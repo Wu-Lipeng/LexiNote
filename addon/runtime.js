@@ -186,7 +186,7 @@ var LexiNoteRuntime = class {
     box.className = "lexinote-popup";
     box.setAttribute("role", "region");
     box.setAttribute("aria-label", "划词释义");
-    box.style.cssText = "box-sizing:border-box;display:block!important;width:560px!important;max-width:calc(100vw - 24px)!important;min-width:320px!important;max-height:72vh;padding:16px;border-top:1px solid #8886;font:14px/1.6 system-ui;color:inherit;white-space:normal;overflow:auto;overflow-wrap:anywhere;";
+    box.style.cssText = "box-sizing:border-box;display:block!important;position:fixed!important;width:560px!important;max-width:calc(100vw - 24px)!important;min-width:320px!important;max-height:72vh;padding:16px;border:1px solid #8886;border-radius:8px;background:Canvas;color:CanvasText;box-shadow:0 4px 18px #0004;font:14px/1.6 system-ui;white-space:normal;overflow:auto;overflow-wrap:anywhere;z-index:2147483647;";
     const heading = make("strong", word);
     heading.style.cssText = "font-size:17px;display:block;overflow-wrap:anywhere;";
     const detail = make("div", this.isConfigured() ? "正在查词…" : "请在 Zotero 设置 → 划词生词本中配置接口。");
@@ -249,7 +249,30 @@ var LexiNoteRuntime = class {
     });
     this.popups.add(popup); this.byReader.set(reader, popup);
     doc.defaultView.addEventListener("unload", popup.dispose, { once: true });
-    append(box);
+    // The reader's native selection popup constrains children to a narrow column.
+    // Mount the panel in the document body and anchor it to the current selection
+    // so the panel can use its own width without being clipped by that popup.
+    const selectionRect = (() => {
+      try {
+        const selection = doc.getSelection?.();
+        return selection?.rangeCount ? selection.getRangeAt(0).getBoundingClientRect() : null;
+      } catch (_) { return null; }
+    })();
+    const viewport = doc.defaultView;
+    if (selectionRect && viewport) {
+      const panelWidth = Math.min(560, Math.max(320, viewport.innerWidth - 24));
+      const left = Math.max(12, Math.min(selectionRect.left, viewport.innerWidth - panelWidth - 12));
+      const estimatedHeight = Math.min(520, Math.max(220, viewport.innerHeight * 0.55));
+      const top = selectionRect.bottom + 12 + estimatedHeight <= viewport.innerHeight
+        ? selectionRect.bottom + 12
+        : Math.max(12, selectionRect.top - estimatedHeight - 12);
+      box.style.left = left + "px";
+      box.style.top = top + "px";
+    } else {
+      box.style.left = "12px";
+      box.style.top = "12px";
+    }
+    (doc.body || doc.documentElement).append(box);
     timer = setTimeout(() => {
       if (!box.isConnected) { popup.dispose(); return; }
       observer = new doc.defaultView.MutationObserver(() => { if (!box.isConnected) popup.dispose(); });
