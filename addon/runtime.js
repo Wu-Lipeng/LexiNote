@@ -296,6 +296,16 @@ var LexiNoteRuntime = class {
         highlightDraft = view._getAnnotationFromSelectionRanges(ranges, "highlight", this.config.highlightColor);
       }
     } catch (_) {}
+    if (!highlightDraft && params?.annotation?.position?.rects?.length) {
+      highlightDraft = {
+        ...params.annotation,
+        type: this.config.highlightType,
+        color: this.config.highlightColor,
+        sortIndex: params.annotation.sortIndex || 1,
+        text: params.annotation.text || word,
+        pageLabel: params.annotation.pageLabel || pageLabel
+      };
+    }
     // Capture the selection before mounting the popup, since mounting it can
     // cause the reader to clear its native text selection.
     (doc.body || doc.documentElement).append(box);
