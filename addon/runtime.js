@@ -62,15 +62,13 @@ var LexiNoteRuntime = class {
     this.cache.clear();
     for (const req of [...this.requests]) req.cancel();
   }
-  autoMark(reader, params) {
+  autoMark(reader, params, draft) {
     if (!this.config.autoHighlight) return false;
     try {
       const internal = reader?._internalReader;
-      const view = internal?._lastView || internal?._primaryView;
-      const ranges = view?._selectionRanges;
       const manager = internal?._annotationManager;
-      if (!view || !manager || !ranges?.length || typeof view._getAnnotationFromSelectionRanges !== "function") return false;
-      const annotation = view._getAnnotationFromSelectionRanges(ranges, this.config.highlightType, this.config.highlightColor);
+      if (!manager || !draft) return false;
+      const annotation = { ...draft, type: this.config.highlightType, color: this.config.highlightColor };
       if (!annotation || !annotation.position?.rects?.length) return false;
       manager.addAnnotation(annotation);
       return true;
@@ -220,7 +218,7 @@ var LexiNoteRuntime = class {
     status.style.cssText = "font-size:12px;margin-top:6px;";
     actions.append(save, retry, close);
     box.append(heading, detail, actions, status);
-    let timer, observer, disposed = false, result;
+    let timer, observer, disposed = false, result, highlightDraft;
     const owner = {};
     const popup = {
       dispose: () => {
@@ -258,7 +256,7 @@ var LexiNoteRuntime = class {
         const saved = await this.saveWord({ attachmentID, word, result, pageLabel, pageIndex });
         if (!disposed) {
           status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
-          if (this.autoMark(reader, params)) status.textContent += " 已自动标记选中文本。";
+          if (this.autoMark(reader, params, highlightDraft)) status.textContent += " 已自动标记选中文本。";
           save.textContent = "已保存";
         }
       } catch (error) {
@@ -291,6 +289,14 @@ var LexiNoteRuntime = class {
       box.style.top = "12px";
     }
     (doc.body || doc.documentElement).append(box);
+    try {
+      const internal = reader?._internalReader;
+      const view = internal?._lastView || internal?._primaryView;
+      const ranges = view?._selectionRanges;
+      if (view && ranges?.length && typeof view._getAnnotationFromSelectionRanges === "function") {
+        highlightDraft = view._getAnnotationFromSelectionRanges(ranges, "highlight", this.config.highlightColor);
+      }
+    } catch (_) {}
     timer = setTimeout(() => {
       if (!box.isConnected) { popup.dispose(); return; }
       observer = new doc.defaultView.MutationObserver(() => { if (!box.isConnected) popup.dispose(); });
