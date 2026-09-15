@@ -1,0 +1,94 @@
+{
+  "version": "7.0.32",
+  "tests": [
+    {
+      "name": "Plugin registered and configuration/credential round trip",
+      "passed": true
+    },
+    {
+      "name": "Actual HTTP request and response extraction",
+      "passed": true
+    },
+    {
+      "name": "Concurrent words and duplicate save use one child note",
+      "passed": true
+    },
+    {
+      "name": "Preserves edited content and escapes API HTML",
+      "passed": true
+    },
+    {
+      "name": "Real DOM popup lookup and save button",
+      "passed": true
+    },
+    {
+      "name": "Rapid selection cancels stale popup and close cleans up",
+      "passed": true
+    },
+    {
+      "name": "Settings page loads and save button works",
+      "passed": true
+    },
+    {
+      "name": "PDF reader mouse selection triggers dictionary popup",
+      "passed": true
+    },
+    {
+      "name": "Standalone attachment returns actionable error",
+      "passed": true
+    },
+    {
+      "name": "Trashed vocabulary note creates a replacement",
+      "passed": true
+    },
+    {
+      "name": "Shutdown cancels requests, clears cache and removes popups",
+      "passed": true
+    }
+  ],
+  "started": "2026-09-14T12:54:29.190Z",
+  "pdfDebug": {
+    "rect": {
+      "left": 132.88333129882812,
+      "top": 92.41667175292969,
+      "width": 277.75,
+      "height": 28.233322143554688
+    },
+    "target": "<span style=\"left: 11.76%; top: 7.44%; font-size: calc(var(--scale-factor)*18.00px); font-family: sans-serif; transform: scaleX(0.940412);\" role=\"presentation\" dir=\"ltr\">hello science example</span>",
+    "observed": [
+      {
+        "text": "hello"
+      }
+    ],
+    "ranges": [
+      {
+        "pageIndex": 0,
+        "anchorOffset": 0,
+        "headOffset": 5,
+        "anchor": true,
+        "head": true,
+        "position": {
+          "pageIndex": 0,
+          "rects": [
+            [
+              72,
+              716.274,
+              110.01599999999999,
+              732.924
+            ]
+          ]
+        },
+        "sortIndex": "00000|000000|00059",
+        "text": "hello"
+      }
+    ],
+    "popups": 1,
+    "popup": "hello/test/\n\n释义：hello\n\n例句\nThis is hello.保存到生词本重试关闭",
+    "stateKeys": [
+      "textSelectionAnnotationMode",
+      "primaryViewSelectionPopup",
+      "secondaryViewSelectionPopup"
+    ]
+  },
+  "finished": "2026-09-14T12:54:33.428Z"
+}

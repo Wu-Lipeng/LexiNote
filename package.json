@@ -1,0 +1,7 @@
+{
+  "name": "lexinote",
+  "version": "0.1.1",
+  "private": true,
+  "description": "Zotero 划词查询与文献生词本",
+  "scripts": { "test": "node --test tests/core.test.cjs" }
+}

@@ -1,0 +1,18 @@
+{
+  "addons": {
+    "lexinote@local.tools": {
+      "updates": [
+        {
+          "version": "0.1.1",
+          "update_link": "https://github.com/Wu-Lipeng/LexiNote/releases/download/v0.1.1/lexinote-0.1.1.xpi",
+          "applications": {
+            "zotero": {
+              "strict_min_version": "7.0",
+              "strict_max_version": "10.0.*"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

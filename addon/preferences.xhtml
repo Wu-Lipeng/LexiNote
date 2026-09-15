@@ -1,0 +1,49 @@
+<vbox xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+      xmlns:html="http://www.w3.org/1999/xhtml" onload="window.LexiNotePreferences.init()">
+  <html:div id="lexinote-settings" style="max-width:760px;line-height:1.6">
+    <html:p>阅读时选中一个单词，自动显示释义；点击保存后，追加到该文献唯一的“生词本”笔记。</html:p>
+    <html:p><html:label><html:input id="lexinote-enabled" type="checkbox"/> 启用划词查询</html:label></html:p>
+    <html:p>启用且配置完成后，选中的单词会发送到配置的接口。不会发送整篇文献。</html:p>
+    <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
+      <html:label for="lexinote-provider">词典接口</html:label>
+      <html:select id="lexinote-provider"><html:option value="generic">通用 GET / POST JSON</html:option><html:option value="baidu">百度文本翻译·词典版</html:option></html:select>
+      <html:label for="lexinote-baiduApiKey">百度 API Key</html:label>
+      <html:input id="lexinote-baiduApiKey" type="password" autocomplete="off"/>
+      <html:label for="lexinote-baiduSecretKey">百度 Secret Key</html:label>
+      <html:input id="lexinote-baiduSecretKey" type="password" autocomplete="off"/>
+      <html:label for="lexinote-endpoint">通用接口地址</html:label>
+      <html:input id="lexinote-endpoint" type="url" placeholder="https://your-service.example/lookup?word={{word}}"/>
+      <html:label for="lexinote-method">请求方式</html:label>
+      <html:select id="lexinote-method"><html:option>GET</html:option><html:option>POST</html:option></html:select>
+      <html:label for="lexinote-key">API 密钥</html:label>
+      <html:input id="lexinote-key" type="password" autocomplete="off" placeholder="无需密钥的接口可留空"/>
+      <html:label for="lexinote-headers">请求头 JSON</html:label>
+      <html:textarea id="lexinote-headers" rows="3" spellcheck="false"/>
+      <html:label for="lexinote-body">POST 请求体</html:label>
+      <html:textarea id="lexinote-body" rows="4" spellcheck="false"/>
+      <html:label for="lexinote-meaningPath">释义字段路径</html:label>
+      <html:input id="lexinote-meaningPath" type="text" placeholder="data.translation"/>
+      <html:label for="lexinote-phoneticPath">音标字段路径</html:label>
+      <html:input id="lexinote-phoneticPath" type="text" placeholder="可留空"/>
+      <html:label for="lexinote-examplePath">例句字段路径</html:label>
+      <html:input id="lexinote-examplePath" type="text" placeholder="可留空"/>
+      <html:label for="lexinote-target">目标语言</html:label>
+      <html:input id="lexinote-target" type="text"/>
+      <html:label for="lexinote-delay">划词延迟 (ms)</html:label>
+      <html:input id="lexinote-delay" type="number" min="150" max="3000"/>
+      <html:label for="lexinote-timeout">请求超时 (ms)</html:label>
+      <html:input id="lexinote-timeout" type="number" min="1000" max="60000"/>
+    </html:div>
+    <html:p>占位符：<html:code>{{word}}</html:code> 单词、<html:code>{{target}}</html:code> 目标语言、<html:code>{{apiKey}}</html:code> 密钥。URL 中自动编码；JSON 中自动转义。</html:p>
+    <html:p>Bearer 认证的请求头示例：<html:code>{"Authorization":"Bearer {{apiKey}}"}</html:code>。密钥单独存入 Zotero 的凭据存储，请勿直接写进模板。清空密钥并保存即可删除。</html:p>
+    <html:p>响应路径支持 <html:code>data.translation</html:code>、<html:code>meanings[0].text</html:code> 和 <html:code>meanings[*].definitions[*].definition</html:code>。根节点填写 <html:code>$</html:code>。仅支持 JSON 响应，不执行接口返回的 HTML 或脚本。</html:p>
+    <html:p>需要动态签名、OAuth 或流式响应的接口须另行适配。</html:p>
+    <html:div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <html:button id="lexinote-save" type="button">保存设置</html:button>
+      <html:input id="lexinote-test-word" type="text" value="example" aria-label="测试单词" style="width:110px"/>
+      <html:button id="lexinote-test" type="button">测试当前配置</html:button>
+      <html:button id="lexinote-clear" type="button">清空查询缓存</html:button>
+    </html:div>
+    <html:p id="lexinote-status" role="status" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:250px;overflow:auto"/>
+  </html:div>
+</vbox>
