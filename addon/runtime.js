@@ -186,12 +186,12 @@ var LexiNoteRuntime = class {
     box.className = "lexinote-popup";
     box.setAttribute("role", "region");
     box.setAttribute("aria-label", "划词释义");
-    box.style.cssText = "box-sizing:border-box;width:560px;max-width:min(560px,calc(100vw - 24px));min-width:0;max-height:72vh;padding:16px;border-top:1px solid #8886;font:14px/1.6 system-ui;color:inherit;white-space:normal;overflow:auto;overflow-wrap:anywhere;";
+    box.style.cssText = "box-sizing:border-box;display:block!important;width:560px!important;max-width:calc(100vw - 24px)!important;min-width:320px!important;max-height:72vh;padding:16px;border-top:1px solid #8886;font:14px/1.6 system-ui;color:inherit;white-space:normal;overflow:auto;overflow-wrap:anywhere;";
     const heading = make("strong", word);
     heading.style.cssText = "font-size:17px;display:block;overflow-wrap:anywhere;";
     const detail = make("div", this.isConfigured() ? "正在查词…" : "请在 Zotero 设置 → 划词生词本中配置接口。");
     detail.setAttribute("aria-live", "polite");
-    detail.style.cssText = "white-space:pre-wrap;max-height:360px;overflow:auto;overflow-wrap:anywhere;word-break:break-word;margin:10px 0;user-select:text;";
+    detail.style.cssText = "display:block;box-sizing:border-box;width:100%;min-width:0;white-space:pre-wrap;max-height:360px;overflow:auto;overflow-wrap:anywhere;word-break:break-word;margin:10px 0;user-select:text;";
     const actions = make("div");
     actions.style.cssText = "display:flex;gap:8px;align-items:center;flex-wrap:wrap;";
     const button = label => {
