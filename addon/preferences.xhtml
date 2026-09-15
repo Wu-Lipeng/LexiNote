@@ -3,6 +3,13 @@
   <html:div id="lexinote-settings" style="max-width:760px;line-height:1.6">
     <html:p>阅读时选中一个单词，自动显示释义；点击保存后，追加到该文献唯一的“生词本”笔记。</html:p>
     <html:p><html:label><html:input id="lexinote-enabled" type="checkbox"/> 启用划词查询</html:label></html:p>
+    <html:p><html:label><html:input id="lexinote-autoHighlight" type="checkbox"/> 保存到生词本后自动标记选中文本</html:label></html:p>
+    <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
+      <html:label for="lexinote-highlightColor">标记颜色</html:label>
+      <html:input id="lexinote-highlightColor" type="color" value="#ffd400"/>
+      <html:label for="lexinote-highlightType">标记样式</html:label>
+      <html:select id="lexinote-highlightType"><html:option value="highlight">高亮</html:option><html:option value="underline">下划线</html:option></html:select>
+    </html:div>
     <html:p>启用且配置完成后，选中的单词会发送到配置的接口。不会发送整篇文献。</html:p>
     <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
       <html:label for="lexinote-provider">词典接口</html:label>

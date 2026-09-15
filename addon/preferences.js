@@ -4,15 +4,16 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     const app = Zotero.LexiNote;
     if (!app || $("settings").dataset.initialized) return;
     $("settings").dataset.initialized = "true";
-    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout"];
+    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType"];
     for (const name of names) $(name).value = app.config[name];
     $("enabled").checked = app.config.enabled;
+    $("autoHighlight").checked = Boolean(app.config.autoHighlight);
     $("baiduApiKey").value = app.config.baiduApiKey || (app.getKey ? app.getKey() : "");
     $("baiduSecretKey").value = app.config.baiduSecretKey || (app.getCredential ? app.getCredential("Baidu Secret Key") : "");
     try { $("key").value = app.getKey(); }
     catch (_) { $("status").textContent = "无法读取凭据存储，请解锁后重新打开设置。"; $("save").disabled = true; }
     const read = () => {
-      const config = { enabled: $("enabled").checked };
+      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked };
       for (const name of names) config[name] = ["delay", "timeout"].includes(name) ? Number($(name).value) : $(name).value;
       config.baiduApiKey = $("baiduApiKey").value.trim(); config.baiduSecretKey = $("baiduSecretKey").value.trim();
       return config;

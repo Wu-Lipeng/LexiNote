@@ -62,6 +62,62 @@ var LexiNoteRuntime = class {
     this.cache.clear();
     for (const req of [...this.requests]) req.cancel();
   }
+  readerFrame(reader) {
+    try {
+      let frame = reader?._iframeWindow;
+      if (frame && typeof Components !== "undefined") frame = Components.utils.waiveXrays(frame);
+      return frame || null;
+    } catch (_) {}
+    return null;
+  }
+  readerInternal(reader) {
+    // Zotero exposes a light wrapper to plugins. The live reader lives in the
+    // PDF iframe; use it first so that addAnnotation also updates the canvas.
+    const frame = this.readerFrame(reader);
+    if (frame?._reader?._annotationManager) return frame._reader;
+    return reader?._internalReader || null;
+  }
+  captureHighlightDraft(reader, params, word, pageLabel) {
+    try {
+      const internal = this.readerInternal(reader);
+      const view = internal?._lastView || internal?._primaryView;
+      const ranges = view?._selectionRanges;
+      if (view && ranges?.length && typeof view._getAnnotationFromSelectionRanges === "function") {
+        // Selection ranges are owned by the reader iframe and vanish once the
+        // popup is focused. Convert to plain data while the selection is live.
+        const draft = view._getAnnotationFromSelectionRanges(ranges, this.config.highlightType, this.config.highlightColor);
+        if (draft?.position?.rects?.length && draft.sortIndex) return JSON.parse(JSON.stringify(draft));
+      }
+    } catch (_) {}
+    const annotation = params?.annotation;
+    if (annotation?.position?.rects?.length && annotation.sortIndex) {
+      return JSON.parse(JSON.stringify({
+        ...annotation,
+        type: this.config.highlightType,
+        color: this.config.highlightColor,
+        text: annotation.text || word,
+        pageLabel: annotation.pageLabel || pageLabel
+      }));
+    }
+    return null;
+  }
+  autoMark(reader, draft) {
+    if (!this.config.autoHighlight) return { marked: false, reason: "disabled" };
+    if (!draft?.position?.rects?.length || !draft.sortIndex) return { marked: false, reason: "未取得选中文本的标注位置。" };
+    try {
+      const manager = this.readerInternal(reader)?._annotationManager;
+      if (!manager?.addAnnotation) return { marked: false, reason: "未连接到 Zotero 标注阅读器。" };
+      const data = { ...draft, type: this.config.highlightType, color: this.config.highlightColor };
+      // addAnnotation reads a content-window object. Passing a chrome-window
+      // object through Xray wrappers loses dictionary properties such as color.
+      const frame = this.readerFrame(reader);
+      const annotation = frame?.JSON?.parse ? frame.JSON.parse(JSON.stringify(data)) : data;
+      manager.addAnnotation(annotation);
+      return { marked: true };
+    } catch (error) {
+      return { marked: false, reason: error?.message || "Zotero 拒绝创建标注。" };
+    }
+  }
   isConfigured(config = this.config) {
     return config.provider === "baidu" ? Boolean(config.baiduApiKey?.trim() && config.baiduSecretKey?.trim()) : Boolean(config.endpoint?.trim());
   }
@@ -206,7 +262,7 @@ var LexiNoteRuntime = class {
     status.style.cssText = "font-size:12px;margin-top:6px;";
     actions.append(save, retry, close);
     box.append(heading, detail, actions, status);
-    let timer, observer, disposed = false, result;
+    let timer, observer, disposed = false, result, highlightDraft;
     const owner = {};
     const popup = {
       dispose: () => {
@@ -242,7 +298,13 @@ var LexiNoteRuntime = class {
       save.disabled = true; status.textContent = "正在保存…";
       try {
         const saved = await this.saveWord({ attachmentID, word, result, pageLabel, pageIndex });
-        if (!disposed) { status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。"; save.textContent = "已保存"; }
+        if (!disposed) {
+          status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
+          const marking = this.autoMark(reader, highlightDraft);
+          if (marking.marked) status.textContent += " 已自动标记选中文本。";
+          else if (this.config.autoHighlight && marking.reason !== "disabled") status.textContent += " 自动标记未完成：" + marking.reason;
+          save.textContent = "已保存";
+        }
       } catch (error) {
         if (!disposed) { status.textContent = error.message; save.disabled = false; }
       }
@@ -272,6 +334,9 @@ var LexiNoteRuntime = class {
       box.style.left = "12px";
       box.style.top = "12px";
     }
+    highlightDraft = this.captureHighlightDraft(reader, params, word, pageLabel);
+    // Capture the selection before mounting the popup, since mounting it can
+    // cause the reader to clear its native text selection.
     (doc.body || doc.documentElement).append(box);
     timer = setTimeout(() => {
       if (!box.isConnected) { popup.dispose(); return; }
