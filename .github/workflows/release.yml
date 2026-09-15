@@ -28,4 +28,6 @@ jobs:
           $tag = "${{ github.ref_name }}"
           $xpi = Get-ChildItem -LiteralPath "dist" -Filter "*.xpi" | Select-Object -First 1
           if (-not $xpi) { throw "Build did not produce an XPI file." }
-          gh release create $tag $xpi.FullName --title "LexiNote $tag" --generate-notes
+          $args = @($tag, $xpi.FullName, "--title", "LexiNote $tag", "--generate-notes")
+          if ($tag -match "-") { $args += "--prerelease" }
+          gh release create @args
