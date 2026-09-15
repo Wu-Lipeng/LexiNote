@@ -245,7 +245,6 @@ var LexiNoteRuntime = class {
         result = await this.lookup(word, this.config, undefined, owner);
         if (disposed) return;
         detail.textContent = [result.phonetic, result.meaning, result.example && "例句\n" + result.example].filter(Boolean).join("\n\n");
-        if (this.autoMark(reader, params)) status.textContent = "已自动标记选中文本。";
         save.disabled = false;
       } catch (error) {
         if (!disposed) { detail.textContent = error.message; retry.hidden = false; }
@@ -257,7 +256,11 @@ var LexiNoteRuntime = class {
       save.disabled = true; status.textContent = "正在保存…";
       try {
         const saved = await this.saveWord({ attachmentID, word, result, pageLabel, pageIndex });
-        if (!disposed) { status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。"; save.textContent = "已保存"; }
+        if (!disposed) {
+          status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
+          if (this.autoMark(reader, params)) status.textContent += " 已自动标记选中文本。";
+          save.textContent = "已保存";
+        }
       } catch (error) {
         if (!disposed) { status.textContent = error.message; save.disabled = false; }
       }
