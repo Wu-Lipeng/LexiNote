@@ -359,22 +359,36 @@ var LexiNoteRuntime = class {
     const parent = await Zotero.Items.getAsync(attachment.parentID);
     if (!parent || parent.deleted || !parent.isRegularItem()) throw new Error("找不到附件所属文献。");
     if (!parent.isEditable()) throw new Error("此文献库为只读，无法保存笔记。");
+    const parser = new DOMParser();
+    const normalizedWord = LexiNoteCore.normalize(word);
     const notes = await Zotero.Items.getAsync(parent.getNotes());
-    let note = notes.find(n => !n.deleted && n.hasTag(this.tag));
-    if (note && !note.isEditable()) throw new Error("生词本笔记不可编辑。");
+    const notebooks = notes.filter(n => !n.deleted && n.hasTag(this.tag));
+    let note = null;
+    // Older plugin versions could leave more than one LexiNote note. Search
+    // every one before choosing where a new word should be appended.
+    for (const candidate of notebooks) {
+      const candidateDocument = parser.parseFromString(candidate.getNote(), "text/html");
+      const candidateRoot = candidateDocument.body.querySelector("div[data-schema-version]") || candidateDocument.body;
+      const duplicate = [...candidateRoot.querySelectorAll("h3")].some(h =>
+        h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
+      );
+      if (duplicate) return { noteID: candidate.id, duplicate: true };
+      if (!note && candidate.isEditable()) note = candidate;
+    }
+    if (!note && notebooks.length) throw new Error("生词本笔记不可编辑。");
     const fresh = !note;
     if (fresh) {
       note = new Zotero.Item("note"); note.libraryID = parent.libraryID; note.parentID = parent.id;
       note.addTag(this.tag);
     }
-    const parser = new DOMParser();
     const document = parser.parseFromString(fresh ? '<div data-schema-version="9"><h1>生词本 · LexiNote</h1></div>' : note.getNote(), "text/html");
     const root = document.body.querySelector("div[data-schema-version]") || document.body;
-    if ([...root.querySelectorAll("h3")].some(h => LexiNoteCore.normalize(h.textContent.trim()) === LexiNoteCore.normalize(word))) {
+    if ([...root.querySelectorAll("h3")].some(h => h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord)) {
       return { noteID: note.id, duplicate: true };
     }
     const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; root.append(el); return el; };
-    add("h3", word);
+    const wordHeading = add("h3", word);
+    wordHeading.dataset.lexinoteWord = normalizedWord;
     if (result.phonetic) add("p", result.phonetic);
     for (const line of result.meaning.split("\n")) if (line) add("p", line);
     if (result.example) add("p", "例句：" + result.example);
