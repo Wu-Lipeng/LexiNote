@@ -62,14 +62,19 @@ var LexiNoteRuntime = class {
     this.cache.clear();
     for (const req of [...this.requests]) req.cancel();
   }
-  readerInternal(reader) {
-    // Zotero exposes a light wrapper to plugins. The live reader lives in the
-    // PDF iframe; use it first so that addAnnotation also updates the canvas.
+  readerFrame(reader) {
     try {
       let frame = reader?._iframeWindow;
       if (frame && typeof Components !== "undefined") frame = Components.utils.waiveXrays(frame);
-      if (frame?._reader?._annotationManager) return frame._reader;
+      return frame || null;
     } catch (_) {}
+    return null;
+  }
+  readerInternal(reader) {
+    // Zotero exposes a light wrapper to plugins. The live reader lives in the
+    // PDF iframe; use it first so that addAnnotation also updates the canvas.
+    const frame = this.readerFrame(reader);
+    if (frame?._reader?._annotationManager) return frame._reader;
     return reader?._internalReader || null;
   }
   captureHighlightDraft(reader, params, word, pageLabel) {
@@ -102,7 +107,12 @@ var LexiNoteRuntime = class {
     try {
       const manager = this.readerInternal(reader)?._annotationManager;
       if (!manager?.addAnnotation) return { marked: false, reason: "未连接到 Zotero 标注阅读器。" };
-      manager.addAnnotation({ ...draft, type: this.config.highlightType, color: this.config.highlightColor });
+      const data = { ...draft, type: this.config.highlightType, color: this.config.highlightColor };
+      // addAnnotation reads a content-window object. Passing a chrome-window
+      // object through Xray wrappers loses dictionary properties such as color.
+      const frame = this.readerFrame(reader);
+      const annotation = frame?.JSON?.parse ? frame.JSON.parse(JSON.stringify(data)) : data;
+      manager.addAnnotation(annotation);
       return { marked: true };
     } catch (error) {
       return { marked: false, reason: error?.message || "Zotero 拒绝创建标注。" };
