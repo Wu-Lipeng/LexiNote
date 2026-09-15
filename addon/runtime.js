@@ -288,7 +288,6 @@ var LexiNoteRuntime = class {
       box.style.left = "12px";
       box.style.top = "12px";
     }
-    (doc.body || doc.documentElement).append(box);
     try {
       const internal = reader?._internalReader;
       const view = internal?._lastView || internal?._primaryView;
@@ -297,6 +296,9 @@ var LexiNoteRuntime = class {
         highlightDraft = view._getAnnotationFromSelectionRanges(ranges, "highlight", this.config.highlightColor);
       }
     } catch (_) {}
+    // Capture the selection before mounting the popup, since mounting it can
+    // cause the reader to clear its native text selection.
+    (doc.body || doc.documentElement).append(box);
     timer = setTimeout(() => {
       if (!box.isConnected) { popup.dispose(); return; }
       observer = new doc.defaultView.MutationObserver(() => { if (!box.isConnected) popup.dispose(); });
