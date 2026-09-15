@@ -186,7 +186,7 @@ var LexiNoteRuntime = class {
     box.className = "lexinote-popup";
     box.setAttribute("role", "region");
     box.setAttribute("aria-label", "划词释义");
-    box.style.cssText = "box-sizing:border-box;width:420px;max-width:85vw;max-height:72vh;padding:16px;border-top:1px solid #8886;font:14px/1.6 system-ui;color:inherit;white-space:normal;overflow:auto;";
+    box.style.cssText = "box-sizing:border-box;width:560px;max-width:min(560px,calc(100vw - 24px));min-width:0;max-height:72vh;padding:16px;border-top:1px solid #8886;font:14px/1.6 system-ui;color:inherit;white-space:normal;overflow:auto;overflow-wrap:anywhere;";
     const heading = make("strong", word);
     heading.style.cssText = "font-size:17px;display:block;overflow-wrap:anywhere;";
     const detail = make("div", this.isConfigured() ? "正在查词…" : "请在 Zotero 设置 → 划词生词本中配置接口。");
