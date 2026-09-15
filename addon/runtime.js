@@ -62,6 +62,20 @@ var LexiNoteRuntime = class {
     this.cache.clear();
     for (const req of [...this.requests]) req.cancel();
   }
+  autoMark(reader, params) {
+    if (!this.config.autoHighlight) return false;
+    try {
+      const internal = reader?._internalReader;
+      const view = internal?._lastView || internal?._primaryView;
+      const ranges = view?._selectionRanges;
+      const manager = internal?._annotationManager;
+      if (!view || !manager || !ranges?.length || typeof view._getAnnotationFromSelectionRanges !== "function") return false;
+      const annotation = view._getAnnotationFromSelectionRanges(ranges, this.config.highlightType, this.config.highlightColor);
+      if (!annotation || !annotation.position?.rects?.length) return false;
+      manager.addAnnotation(annotation);
+      return true;
+    } catch (_) { return false; }
+  }
   isConfigured(config = this.config) {
     return config.provider === "baidu" ? Boolean(config.baiduApiKey?.trim() && config.baiduSecretKey?.trim()) : Boolean(config.endpoint?.trim());
   }
@@ -231,6 +245,7 @@ var LexiNoteRuntime = class {
         result = await this.lookup(word, this.config, undefined, owner);
         if (disposed) return;
         detail.textContent = [result.phonetic, result.meaning, result.example && "例句\n" + result.example].filter(Boolean).join("\n\n");
+        if (this.autoMark(reader, params)) status.textContent = "已自动标记选中文本。";
         save.disabled = false;
       } catch (error) {
         if (!disposed) { detail.textContent = error.message; retry.hidden = false; }
