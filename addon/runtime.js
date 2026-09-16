@@ -296,7 +296,7 @@ var LexiNoteRuntime = class {
     box.style.cssText = "box-sizing:border-box;display:block!important;position:fixed!important;width:560px!important;max-width:calc(100vw - 24px)!important;min-width:320px!important;max-height:72vh;padding:16px;border:1px solid #8886;border-radius:8px;background:Canvas;color:CanvasText;box-shadow:0 4px 18px #0004;font:14px/1.6 system-ui;white-space:normal;overflow:auto;overflow-wrap:anywhere;z-index:2147483647;";
     const heading = make("strong", word);
     heading.style.cssText = "font-size:17px;display:block;overflow-wrap:anywhere;";
-    const detail = make("div", this.isConfigured() ? "正在查词…" : "请在 Zotero 设置 → 划词生词本中配置接口。");
+    const detail = make("div", "正在查词…");
     detail.setAttribute("aria-live", "polite");
     detail.style.cssText = "display:block;box-sizing:border-box;width:100%;min-width:0;white-space:pre-wrap;max-height:360px;overflow:auto;overflow-wrap:anywhere;word-break:break-word;margin:10px 0;user-select:text;";
     const actions = make("div");
@@ -393,7 +393,7 @@ var LexiNoteRuntime = class {
       if (!box.isConnected) { popup.dispose(); return; }
       observer = new doc.defaultView.MutationObserver(() => { if (!box.isConnected) popup.dispose(); });
       observer.observe(doc.documentElement, { childList: true, subtree: true });
-      if (this.isConfigured()) run();
+      run();
     }, this.config.delay);
   }
   saveWord(entry) {
