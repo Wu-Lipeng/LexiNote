@@ -52,10 +52,10 @@ test('Baidu general mode accepts own credentials or local trial mode', () => {
   assert.doesNotThrow(() => C.validate({ ...C.defaults, provider: 'baidu-general', useBaiduTrial: true }));
   assert.throws(() => C.validate({ ...C.defaults, provider: 'baidu-general' }), /百度 API Key/);
 });
-function runtime() {
+function runtime(initialConfig = base, credentials = {}) {
   let sent = 0;
   const requests = [];
-  const prefs = { 'extensions.lexinote.config': JSON.stringify(base) };
+  const prefs = { 'extensions.lexinote.config': JSON.stringify(initialConfig) };
   class FakeXHR {
     open(method,url) { this.method=method; this.url=url; }
     setRequestHeader() {}
@@ -64,7 +64,7 @@ function runtime() {
     respond(status, value) { this.status=status; this.responseText=JSON.stringify(value); this.onload?.(); }
   }
   const context = vm.createContext({ LexiNoteCore:C, LexiNoteTrialCredentials:{baiduApiKey:'trial-key',baiduSecretKey:'trial-secret'}, XMLHttpRequest:FakeXHR, URL, setTimeout,clearTimeout,
-    Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}}}, Services:{logins:{findLogins:()=>[]}} });
+    Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}}}, Services:{logins:{findLogins:(_,__,name)=>credentials[name] ? [{password:credentials[name]}] : []}} });
   vm.runInContext(fs.readFileSync(require.resolve('../addon/runtime.js'),'utf8'),context);
   const app = vm.runInContext('new LexiNoteRuntime({id:"test",rootURI:""})',context);
   return {app,requests,prefs,sent:()=>sent};
@@ -100,6 +100,16 @@ test('saved Baidu credentials keep the dictionary provider configured', () => {
     'Baidu Dictionary Secret Key':'dictionary-secret'
   })[name] || '';
   assert.equal(app.isConfigured(),true);
+});
+test('startup restores saved Baidu credentials into the runtime configuration', () => {
+  const {app,prefs}=runtime({...C.defaults,provider:'baidu'}, {
+    'Baidu Dictionary API Key':'dictionary-key',
+    'Baidu Dictionary Secret Key':'dictionary-secret'
+  });
+  assert.equal(app.config.baiduApiKey,'dictionary-key');
+  assert.equal(app.config.baiduSecretKey,'dictionary-secret');
+  const persisted = JSON.parse(prefs['extensions.lexinote.config']);
+  assert.equal(persisted.baiduApiKey,''); assert.equal(persisted.baiduSecretKey,'');
 });
 test('candidate lookup keeps successful spellings and reports no usable result', async () => {
   const {app}=runtime();

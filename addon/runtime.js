@@ -18,7 +18,10 @@ var LexiNoteRuntime = class {
     this.revision = 0;
   }
   readConfig() {
-    try { return LexiNoteCore.validate(JSON.parse(Zotero.Prefs.get(this.pref, true) || "{}"), true); }
+    try {
+      const config = LexiNoteCore.validate(JSON.parse(Zotero.Prefs.get(this.pref, true) || "{}"), true);
+      return this.withBaiduCredentials(config);
+    }
     catch (_) { return { ...LexiNoteCore.defaults }; }
   }
   async start() {
@@ -34,13 +37,27 @@ var LexiNoteRuntime = class {
     return this.getCredential("Generic API Key") || this.getCredential("API key");
   }
   getCredential(name) {
-    if (typeof Services === "undefined") return "";
-    return Services.logins.findLogins(this.loginOrigin, null, name)[0]?.password || "";
+    try {
+      if (typeof Services === "undefined") return "";
+      return Services.logins.findLogins(this.loginOrigin, null, name)[0]?.password || "";
+    } catch (_) { return ""; }
   }
   baiduCredentialNames(provider) {
     return provider === "baidu-general"
       ? { apiKey: "Baidu General API Key", secretKey: "Baidu General Secret Key" }
       : { apiKey: "Baidu Dictionary API Key", secretKey: "Baidu Dictionary Secret Key" };
+  }
+  baiduCredentials(config) {
+    const names = this.baiduCredentialNames(config.provider);
+    return {
+      apiKey: config.baiduApiKey?.trim() || this.getCredential(names.apiKey) || this.getCredential("Baidu API Key") || this.getCredential("API key"),
+      secretKey: config.baiduSecretKey?.trim() || this.getCredential(names.secretKey) || this.getCredential("Baidu Secret Key")
+    };
+  }
+  withBaiduCredentials(config) {
+    if (!["baidu", "baidu-general"].includes(config.provider) || config.useBaiduTrial) return config;
+    const credentials = this.baiduCredentials(config);
+    return { ...config, baiduApiKey: credentials.apiKey, baiduSecretKey: credentials.secretKey };
   }
   async setKey(key) {
     return this.setCredential("Generic API Key", key);
@@ -161,10 +178,8 @@ var LexiNoteRuntime = class {
   isConfigured(config = this.config) {
     if (["baidu", "baidu-general"].includes(config.provider)) {
       if (config.useBaiduTrial) return this.trialStatus().configured;
-      const names = this.baiduCredentialNames(config.provider);
-      const apiKey = config.baiduApiKey?.trim() || this.getCredential(names.apiKey) || this.getCredential("Baidu API Key") || this.getCredential("API key");
-      const secretKey = config.baiduSecretKey?.trim() || this.getCredential(names.secretKey) || this.getCredential("Baidu Secret Key");
-      return Boolean(apiKey && secretKey);
+      const credentials = this.baiduCredentials(config);
+      return Boolean(credentials.apiKey && credentials.secretKey);
     }
     return Boolean(config.endpoint?.trim());
   }
@@ -240,9 +255,9 @@ var LexiNoteRuntime = class {
   async lookupBaidu(word, config, owner = {}) {
     const trial = config.useBaiduTrial;
     const trialCredentials = this.trialCredentials();
-    const names = this.baiduCredentialNames(config.provider);
-    const apiKey = trial ? trialCredentials.apiKey : (config.baiduApiKey || this.getCredential(names.apiKey) || this.getCredential("Baidu API Key") || this.getCredential("API key"));
-    const secretKey = trial ? trialCredentials.secretKey : (config.baiduSecretKey || this.getCredential(names.secretKey) || this.getCredential("Baidu Secret Key"));
+    const credentials = this.baiduCredentials(config);
+    const apiKey = trial ? trialCredentials.apiKey : credentials.apiKey;
+    const secretKey = trial ? trialCredentials.secretKey : credentials.secretKey;
     if (!apiKey || !secretKey) throw new Error("请在设置中填写百度 API Key 和 Secret Key。");
     if (trial) this.consumeTrialQuota();
     const tokenKey = "__lexinote_baidu_token:" + config.provider + ":" + (trial ? "trial" : "user");
@@ -330,7 +345,7 @@ var LexiNoteRuntime = class {
     status.style.cssText = "font-size:12px;margin-top:6px;";
     actions.append(candidatePicker, save, retry, close);
     box.append(heading, detail, actions, status);
-    let timer, observer, disposed = false, result, matches = [], highlightDraft;
+    let timer, observer, disposed = false, result, matches = [], selectedMatch, highlightDraft;
     const owner = {};
     const popup = {
       dispose: () => {
@@ -352,13 +367,14 @@ var LexiNoteRuntime = class {
     const selectMatch = index => {
       const entry = matches[index];
       if (!entry) return;
+      selectedMatch = entry;
       result = entry.result;
       save.textContent = "保存「" + entry.word + "」";
     };
     candidatePicker.addEventListener("change", () => selectMatch(Number(candidatePicker.value)));
     const run = async () => {
       if (disposed || !box.isConnected) { popup.dispose(); return; }
-      retry.hidden = true; detail.textContent = "正在查词…"; save.disabled = true; candidatePicker.hidden = true; candidatePicker.replaceChildren(); matches = []; result = undefined;
+      retry.hidden = true; detail.textContent = "正在查词…"; save.disabled = true; candidatePicker.hidden = true; candidatePicker.replaceChildren(); matches = []; selectedMatch = undefined; result = undefined;
       try {
         matches = await this.lookupCandidates(word, this.config, owner);
         if (disposed) return;
@@ -382,7 +398,7 @@ var LexiNoteRuntime = class {
       if (!result || save.disabled) return;
       save.disabled = true; status.textContent = "正在保存…";
       try {
-        const saved = await this.saveWord({ attachmentID, word, result, pageLabel, pageIndex });
+        const saved = await this.saveWord({ attachmentID, word: selectedMatch?.word || word, result, pageLabel, pageIndex });
         if (!disposed) {
           status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
           const marking = this.autoMark(reader, highlightDraft);
