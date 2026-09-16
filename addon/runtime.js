@@ -56,6 +56,10 @@ var LexiNoteRuntime = class {
   }
   async saveConfig(input, key) {
     const config = LexiNoteCore.validate(input, !input.enabled);
+    // Keep newly entered Baidu credentials available for this running Zotero
+    // session. The separately persisted preference below deliberately omits
+    // them, while the login manager remains the durable credential store.
+    const runtimeConfig = { ...config };
     const baidu = ["baidu", "baidu-general"].includes(config.provider);
     if (baidu && !config.useBaiduTrial) {
       const names = this.baiduCredentialNames(config.provider);
@@ -69,7 +73,7 @@ var LexiNoteRuntime = class {
     config.baiduApiKey = "";
     config.baiduSecretKey = "";
     Zotero.Prefs.set(this.pref, JSON.stringify(config), true);
-    this.config = config;
+    this.config = runtimeConfig;
     this.revision++;
     this.clearCache();
     for (const popup of [...this.popups]) popup.dispose();

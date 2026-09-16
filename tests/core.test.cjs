@@ -71,12 +71,14 @@ test('local trial quota resets daily and stops after 50 requests', () => {
   assert.deepEqual({...app.trialStatus()},{configured:true,used:0,limit:50,remaining:50});
 });
 test('provider credentials are stored separately and removed from configuration JSON', async () => {
-  const {app}=runtime(); const stored={};
+  const {app,prefs}=runtime(); const stored={};
   app.setCredential=async(name,value)=>{stored[name]=value;};
   app.setKey=async value=>{stored['Generic API Key']=value;};
   await app.saveConfig({...C.defaults,provider:'baidu-general',baiduApiKey:'baidu-key',baiduSecretKey:'baidu-secret'},'ignored');
   assert.deepEqual(stored,{'Baidu General API Key':'baidu-key','Baidu General Secret Key':'baidu-secret'});
-  assert.equal(app.config.baiduApiKey,''); assert.equal(app.config.baiduSecretKey,'');
+  assert.equal(app.config.baiduApiKey,'baidu-key'); assert.equal(app.config.baiduSecretKey,'baidu-secret');
+  const persisted = JSON.parse(prefs['extensions.lexinote.config']);
+  assert.equal(persisted.baiduApiKey,''); assert.equal(persisted.baiduSecretKey,'');
   await app.saveConfig({...C.defaults,provider:'baidu',baiduApiKey:'dictionary-key',baiduSecretKey:'dictionary-secret'},'ignored');
   assert.equal(stored['Baidu Dictionary API Key'],'dictionary-key');
   assert.equal(stored['Baidu Dictionary Secret Key'],'dictionary-secret');
