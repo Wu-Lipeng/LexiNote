@@ -336,16 +336,13 @@ var LexiNoteRuntime = class {
       b.style.cssText = "font:inherit;border:1px solid #8888;border-radius:5px;padding:4px 9px;cursor:pointer;color:inherit;background:transparent;";
       return b;
     };
-    const candidatePicker = make("select"); candidatePicker.hidden = true;
-    candidatePicker.style.cssText = "font:inherit;max-width:180px;padding:3px;";
-    const save = button("保存到生词本"); save.disabled = true;
     const retry = button("重试"); retry.hidden = true;
     const close = button("关闭");
     const status = make("div"); status.setAttribute("aria-live", "polite");
     status.style.cssText = "font-size:12px;margin-top:6px;";
-    actions.append(candidatePicker, save, retry, close);
+    actions.append(retry, close);
     box.append(heading, detail, actions, status);
-    let timer, observer, disposed = false, result, matches = [], selectedMatch, highlightDraft;
+    let timer, observer, disposed = false, matches = [], highlightDraft;
     const owner = {};
     const popup = {
       dispose: () => {
@@ -364,52 +361,52 @@ var LexiNoteRuntime = class {
     }
     box.addEventListener("keydown", event => { if (event.key === "Escape") popup.dispose(); });
     const formatResult = entry => [entry.result.phonetic, entry.result.meaning, entry.result.example && "例句\n" + entry.result.example].filter(Boolean).join("\n\n");
-    const selectMatch = index => {
-      const entry = matches[index];
-      if (!entry) return;
-      selectedMatch = entry;
-      result = entry.result;
-      save.textContent = "保存「" + entry.word + "」";
-    };
-    candidatePicker.addEventListener("change", () => selectMatch(Number(candidatePicker.value)));
-    const run = async () => {
-      if (disposed || !box.isConnected) { popup.dispose(); return; }
-      retry.hidden = true; detail.textContent = "正在查词…"; save.disabled = true; candidatePicker.hidden = true; candidatePicker.replaceChildren(); matches = []; selectedMatch = undefined; result = undefined;
+    const saveMatch = async (entry, saveButton) => {
+      if (saveButton.disabled) return;
+      saveButton.disabled = true; status.textContent = "正在保存…";
       try {
-        matches = await this.lookupCandidates(word, this.config, owner);
-        if (disposed) return;
-        detail.textContent = matches.length === 1
-          ? formatResult(matches[0])
-          : matches.map(entry => "【" + entry.word + "】\n" + formatResult(entry)).join("\n\n");
-        if (matches.length > 1) {
-          for (const [index, entry] of matches.entries()) {
-            const option = make("option", entry.word); option.value = String(index); candidatePicker.append(option);
-          }
-          candidatePicker.hidden = false;
-        }
-        selectMatch(0);
-        save.disabled = false;
-      } catch (error) {
-        if (!disposed) { detail.textContent = error.message; retry.hidden = false; }
-      }
-    };
-    retry.addEventListener("click", run);
-    save.addEventListener("click", async () => {
-      if (!result || save.disabled) return;
-      save.disabled = true; status.textContent = "正在保存…";
-      try {
-        const saved = await this.saveWord({ attachmentID, word: selectedMatch?.word || word, result, pageLabel, pageIndex });
+        const saved = await this.saveWord({ attachmentID, word: entry.word, result: entry.result, pageLabel, pageIndex });
         if (!disposed) {
           status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
           const marking = this.autoMark(reader, highlightDraft);
           if (marking.marked) status.textContent += " 已自动标记选中文本。";
           else if (this.config.autoHighlight && marking.reason !== "disabled") status.textContent += " 自动标记未完成：" + marking.reason;
-          save.textContent = "已保存";
+          saveButton.textContent = "已保存";
         }
       } catch (error) {
-        if (!disposed) { status.textContent = error.message; save.disabled = false; }
+        if (!disposed) { status.textContent = error.message; saveButton.disabled = false; }
       }
-    });
+    };
+    const renderMatches = () => {
+      detail.replaceChildren();
+      for (const entry of matches) {
+        const section = make("div");
+        section.style.cssText = "padding:8px 0;";
+        if (matches.length > 1) {
+          const title = make("strong", entry.word);
+          title.style.cssText = "display:block;margin-bottom:4px;";
+          section.append(title);
+        }
+        section.append(make("div", formatResult(entry)));
+        const saveButton = button("保存 " + entry.word);
+        saveButton.style.marginTop = "8px";
+        saveButton.addEventListener("click", () => saveMatch(entry, saveButton));
+        section.append(saveButton);
+        detail.append(section);
+      }
+    };
+    const run = async () => {
+      if (disposed || !box.isConnected) { popup.dispose(); return; }
+      retry.hidden = true; detail.textContent = "正在查词…"; matches = [];
+      try {
+        matches = await this.lookupCandidates(word, this.config, owner);
+        if (disposed) return;
+        renderMatches();
+      } catch (error) {
+        if (!disposed) { detail.textContent = error.message; retry.hidden = false; }
+      }
+    };
+    retry.addEventListener("click", run);
     this.popups.add(popup); this.byReader.set(reader, popup);
     doc.defaultView.addEventListener("unload", popup.dispose, { once: true });
     // The reader's native selection popup constrains children to a narrow column.
