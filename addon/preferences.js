@@ -8,15 +8,27 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     for (const name of names) $(name).value = app.config[name];
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
+    const baiduDrafts = {};
+    let previousProvider = $("provider").value;
     const loadBaiduCredentials = () => {
       const provider = $("provider").value;
       if (!["baidu", "baidu-general"].includes(provider)) { $("baiduApiKey").value = ""; $("baiduSecretKey").value = ""; return; }
+      if (baiduDrafts[provider]) {
+        $("baiduApiKey").value = baiduDrafts[provider].apiKey;
+        $("baiduSecretKey").value = baiduDrafts[provider].secretKey;
+        return;
+      }
       const names = app.baiduCredentialNames(provider);
       const current = app.config.provider === provider ? app.config : {};
-      const legacyApiKey = current.baiduApiKey || app.getCredential("Baidu API Key") || (app.getKey ? app.getKey() : "");
-      const legacySecretKey = current.baiduSecretKey || app.getCredential("Baidu Secret Key");
-      $("baiduApiKey").value = app.getCredential(names.apiKey) || (app.config.provider === provider ? legacyApiKey : "");
-      $("baiduSecretKey").value = app.getCredential(names.secretKey) || (app.config.provider === provider ? legacySecretKey : "");
+      const legacyApiKey = current.baiduApiKey || (provider === "baidu" ? app.getCredential("Baidu API Key") : "");
+      const legacySecretKey = current.baiduSecretKey || (provider === "baidu" ? app.getCredential("Baidu Secret Key") : "");
+      $("baiduApiKey").value = app.getCredential(names.apiKey) || legacyApiKey;
+      $("baiduSecretKey").value = app.getCredential(names.secretKey) || legacySecretKey;
+    };
+    const rememberBaiduCredentials = () => {
+      if (["baidu", "baidu-general"].includes(previousProvider)) {
+        baiduDrafts[previousProvider] = { apiKey: $("baiduApiKey").value, secretKey: $("baiduSecretKey").value };
+      }
     };
     loadBaiduCredentials();
     $("useBaiduTrial").checked = Boolean(app.config.useBaiduTrial);
@@ -58,7 +70,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     };
     $("method").addEventListener("change", updateMethod);
     const updateTrialStatus = () => { if ($("useBaiduTrial").checked) { const status = app.trialStatus(); $("status").textContent = status.configured ? `试用接口：今日剩余 ${status.remaining} / ${status.limit} 次。` : "试用密钥尚未内置，请联系插件发布者。"; } };
-    $("provider").addEventListener("change", () => { loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
+    $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
     $("test").addEventListener("click", async () => {
