@@ -4,6 +4,7 @@ var LexiNoteRuntime = class {
     this.id = id;
     this.rootURI = rootURI;
     this.pref = "extensions.lexinote.config";
+    this.trialUsagePref = "extensions.lexinote.trialUsage";
     this.loginOrigin = "chrome://lexinote";
     this.tag = "LexiNote:生词本";
     this.cache = new Map();
@@ -30,14 +31,19 @@ var LexiNoteRuntime = class {
     Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.handler, this.id);
   }
   getKey() {
-    return Services.logins.findLogins(this.loginOrigin, null, "API key")[0]?.password || "";
+    return this.getCredential("Generic API Key") || this.getCredential("API key");
   }
   getCredential(name) {
     if (typeof Services === "undefined") return "";
     return Services.logins.findLogins(this.loginOrigin, null, name)[0]?.password || "";
   }
+  baiduCredentialNames(provider) {
+    return provider === "baidu-general"
+      ? { apiKey: "Baidu General API Key", secretKey: "Baidu General Secret Key" }
+      : { apiKey: "Baidu Dictionary API Key", secretKey: "Baidu Dictionary Secret Key" };
+  }
   async setKey(key) {
-    return this.setCredential("API key", key);
+    return this.setCredential("Generic API Key", key);
   }
   async setCredential(name, key) {
     const existing = Services.logins.findLogins(this.loginOrigin, null, name);
@@ -50,8 +56,18 @@ var LexiNoteRuntime = class {
   }
   async saveConfig(input, key) {
     const config = LexiNoteCore.validate(input, !input.enabled);
-    await this.setKey(key);
-    if (config.provider === "baidu") await this.setCredential("Baidu Secret Key", input.baiduSecretKey || "");
+    const baidu = ["baidu", "baidu-general"].includes(config.provider);
+    if (baidu && !config.useBaiduTrial) {
+      const names = this.baiduCredentialNames(config.provider);
+      await this.setCredential(names.apiKey, input.baiduApiKey || "");
+      await this.setCredential(names.secretKey, input.baiduSecretKey || "");
+    } else if (!baidu) {
+      await this.setKey(key);
+    }
+    // Credentials belong exclusively in Zotero's login manager, never in the
+    // JSON preference that stores the rest of the add-on configuration.
+    config.baiduApiKey = "";
+    config.baiduSecretKey = "";
     Zotero.Prefs.set(this.pref, JSON.stringify(config), true);
     this.config = config;
     this.revision++;
@@ -118,13 +134,34 @@ var LexiNoteRuntime = class {
       return { marked: false, reason: error?.message || "Zotero 拒绝创建标注。" };
     }
   }
+  trialCredentials() {
+    const source = typeof LexiNoteTrialCredentials === "object" ? LexiNoteTrialCredentials : {};
+    return { apiKey: String(source.baiduApiKey || "").trim(), secretKey: String(source.baiduSecretKey || "").trim() };
+  }
+  trialDate(now = new Date()) {
+    return now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0") + "-" + String(now.getDate()).padStart(2, "0");
+  }
+  trialStatus() {
+    let usage = {};
+    try { usage = JSON.parse(Zotero.Prefs.get(this.trialUsagePref, true) || "{}"); } catch (_) {}
+    const count = usage.date === this.trialDate() ? Math.max(0, Number(usage.count) || 0) : 0;
+    return { configured: Boolean(this.trialCredentials().apiKey && this.trialCredentials().secretKey), used: count, limit: 50, remaining: Math.max(0, 50 - count) };
+  }
+  consumeTrialQuota() {
+    const status = this.trialStatus();
+    if (!status.configured) throw new Error("试用密钥尚未内置，请联系插件发布者。");
+    if (status.remaining < 1) throw new Error("今日试用额度已用完（50/50），请明天再试或填写自己的百度密钥。");
+    Zotero.Prefs.set(this.trialUsagePref, JSON.stringify({ date: this.trialDate(), count: status.used + 1 }), true);
+    return { ...status, used: status.used + 1, remaining: status.remaining - 1 };
+  }
   isConfigured(config = this.config) {
-    return config.provider === "baidu" ? Boolean(config.baiduApiKey?.trim() && config.baiduSecretKey?.trim()) : Boolean(config.endpoint?.trim());
+    if (["baidu", "baidu-general"].includes(config.provider)) return config.useBaiduTrial ? this.trialStatus().configured : Boolean(config.baiduApiKey?.trim() && config.baiduSecretKey?.trim());
+    return Boolean(config.endpoint?.trim());
   }
   async lookup(word, input = this.config, keyOverride, owner = {}) {
     if (!this.alive) throw new Error("插件已停用。");
     const config = LexiNoteCore.validate(input);
-    if (config.provider === "baidu") return this.lookupBaidu(word, config, owner);
+    if (["baidu", "baidu-general"].includes(config.provider)) return this.lookupBaidu(word, config, owner);
     const cacheable = input === this.config && keyOverride === undefined;
     const cacheKey = word; // Keep case: US and us can have different definitions.
     const cached = cacheable && this.cache.get(cacheKey);
@@ -180,10 +217,14 @@ var LexiNoteRuntime = class {
     return result;
   }
   async lookupBaidu(word, config, owner = {}) {
-    const apiKey = config.baiduApiKey || this.getKey();
-    const secretKey = config.baiduSecretKey || this.getCredential("Baidu Secret Key");
+    const trial = config.useBaiduTrial;
+    const trialCredentials = this.trialCredentials();
+    const names = this.baiduCredentialNames(config.provider);
+    const apiKey = trial ? trialCredentials.apiKey : (config.baiduApiKey || this.getCredential(names.apiKey) || this.getCredential("Baidu API Key") || this.getCredential("API key"));
+    const secretKey = trial ? trialCredentials.secretKey : (config.baiduSecretKey || this.getCredential(names.secretKey) || this.getCredential("Baidu Secret Key"));
     if (!apiKey || !secretKey) throw new Error("请在设置中填写百度 API Key 和 Secret Key。");
-    const tokenKey = "__lexinote_baidu_token";
+    if (trial) this.consumeTrialQuota();
+    const tokenKey = "__lexinote_baidu_token:" + config.provider + ":" + (trial ? "trial" : "user");
     let token = this.cache.get(tokenKey)?.value;
     if (!token || Date.now() >= token.expiresAt - 3600000) {
       const tokenURL = "https://aip.baidubce.com/oauth/2.0/token?grant_type=client_credentials&client_id="
@@ -194,14 +235,18 @@ var LexiNoteRuntime = class {
       token = { value: tokenData.access_token, expiresAt: Date.now() + Math.max(60000, Number(tokenData.expires_in || 2592000) * 1000) };
       this.cache.set(tokenKey, { time: Date.now(), value: token });
     }
-    const response = await Zotero.HTTP.request("POST", "https://aip.baidubce.com/rpc/2.0/mt/texttrans-with-dict/v1?access_token=" + encodeURIComponent(token.value), {
+    const endpoint = config.provider === "baidu-general" ? "https://aip.baidubce.com/rpc/2.0/mt/texttrans/v1" : "https://aip.baidubce.com/rpc/2.0/mt/texttrans-with-dict/v1";
+    const response = await Zotero.HTTP.request("POST", endpoint + "?access_token=" + encodeURIComponent(token.value), {
       body: JSON.stringify({ from: "en", to: config.target === "zh-CN" ? "zh" : config.target, q: word.trim() }),
       headers: { "Content-Type": "application/json" }, timeout: config.timeout,
       cancellerReceiver: cancel => { owner.cancel = cancel; }
     });
     let data; try { data = JSON.parse(response.responseText); } catch (_) { throw new Error("百度词典响应不是有效 JSON。"); }
-    const row = data?.result?.trans_result?.[0];
+    const row = (config.provider === "baidu-general"
+      ? (data?.result?.trans_result?.[0] || data?.trans_result?.[0])
+      : data?.result?.trans_result?.[0]);
     if (!row) throw new Error(data?.error_msg || "百度词典没有返回结果。");
+    if (config.provider === "baidu-general") return { meaning: String(row.dst || "暂无翻译结果"), phonetic: "", example: "" };
     let dictionary = {};
     if (row.dict) { try { dictionary = JSON.parse(row.dict); } catch (_) {} }
     const wr = dictionary.word_result || {};

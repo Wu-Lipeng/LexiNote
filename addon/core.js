@@ -3,7 +3,7 @@ var LexiNoteCore = (() => {
   "use strict";
   const defaults = Object.freeze({
     enabled: true, provider: "generic", endpoint: "", method: "GET", headers: "{}",
-    baiduApiKey: "", baiduSecretKey: "",
+    baiduApiKey: "", baiduSecretKey: "", useBaiduTrial: false,
     body: '{"word":"{{word}}","target":"{{target}}"}',
     meaningPath: "translation", phoneticPath: "", examplePath: "",
     target: "zh-CN", delay: 350, timeout: 12000,
@@ -57,9 +57,11 @@ var LexiNoteCore = (() => {
   function validate(input, allowEmpty = false) {
     const c = { ...defaults, ...input };
     c.endpoint = c.endpoint.trim();
-    if (!["generic", "baidu"].includes(c.provider)) throw new Error("词典接口类型不正确。");
-    if (c.provider === "baidu") {
-      if (!allowEmpty && (!c.baiduApiKey.trim() || !c.baiduSecretKey.trim())) throw new Error("请填写百度 API Key 和 Secret Key。");
+    if (!["generic", "baidu", "baidu-general"].includes(c.provider)) throw new Error("词典接口类型不正确。");
+    if (["baidu", "baidu-general"].includes(c.provider)) {
+      if (typeof c.useBaiduTrial !== "boolean") throw new Error("试用接口设置不正确。");
+      if (c.useBaiduTrial && c.provider !== "baidu-general") throw new Error("试用接口仅支持百度文本翻译·通用版。");
+      if (!allowEmpty && !c.useBaiduTrial && (!c.baiduApiKey.trim() || !c.baiduSecretKey.trim())) throw new Error("请填写百度 API Key 和 Secret Key，或启用试用接口。");
       return c;
     }
     if (!c.endpoint && !allowEmpty) throw new Error("请先在设置中填写接口地址。");

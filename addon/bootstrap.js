@@ -7,6 +7,7 @@ function onMainWindowUnload() {}
 async function startup({ id, rootURI }) {
   await Zotero.initializationPromise;
   Services.scriptloader.loadSubScript(rootURI + "core.js", globalThis);
+  Services.scriptloader.loadSubScript(rootURI + "trial-credentials.js", globalThis);
   Services.scriptloader.loadSubScript(rootURI + "runtime.js", globalThis);
   LexiNote = new LexiNoteRuntime({ id, rootURI });
   Zotero.LexiNote = LexiNote;

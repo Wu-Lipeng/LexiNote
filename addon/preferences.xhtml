@@ -13,11 +13,13 @@
     <html:p>启用且配置完成后，选中的单词会发送到配置的接口。不会发送整篇文献。</html:p>
     <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
       <html:label for="lexinote-provider">词典接口</html:label>
-      <html:select id="lexinote-provider"><html:option value="generic">通用 GET / POST JSON</html:option><html:option value="baidu">百度文本翻译·词典版</html:option></html:select>
+      <html:select id="lexinote-provider"><html:option value="generic">通用 GET / POST JSON</html:option><html:option value="baidu">百度文本翻译·词典版</html:option><html:option value="baidu-general">百度文本翻译·通用版</html:option></html:select>
       <html:label for="lexinote-baiduApiKey">百度 API Key</html:label>
       <html:input id="lexinote-baiduApiKey" type="password" autocomplete="off"/>
       <html:label for="lexinote-baiduSecretKey">百度 Secret Key</html:label>
       <html:input id="lexinote-baiduSecretKey" type="password" autocomplete="off"/>
+      <html:label for="lexinote-useBaiduTrial">试用接口</html:label>
+      <html:label><html:input id="lexinote-useBaiduTrial" type="checkbox"/> 使用内置试用密钥（本机每日最多 50 次）</html:label>
       <html:label for="lexinote-endpoint">通用接口地址</html:label>
       <html:input id="lexinote-endpoint" type="url" placeholder="https://your-service.example/lookup?word={{word}}"/>
       <html:label for="lexinote-method">请求方式</html:label>
@@ -45,6 +47,7 @@
     <html:p>Bearer 认证的请求头示例：<html:code>{"Authorization":"Bearer {{apiKey}}"}</html:code>。密钥单独存入 Zotero 的凭据存储，请勿直接写进模板。清空密钥并保存即可删除。</html:p>
     <html:p>响应路径支持 <html:code>data.translation</html:code>、<html:code>meanings[0].text</html:code> 和 <html:code>meanings[*].definitions[*].definition</html:code>。根节点填写 <html:code>$</html:code>。仅支持 JSON 响应，不执行接口返回的 HTML 或脚本。</html:p>
     <html:p>需要动态签名、OAuth 或流式响应的接口须另行适配。</html:p>
+    <html:p>试用接口仅适用于百度通用版，限额按本机 Zotero 配置文件统计；清除或修改本地数据可以绕过该限额。</html:p>
     <html:div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <html:button id="lexinote-save" type="button">保存设置</html:button>
       <html:input id="lexinote-test-word" type="text" value="example" aria-label="测试单词" style="width:110px"/>

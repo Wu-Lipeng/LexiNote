@@ -8,24 +8,59 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     for (const name of names) $(name).value = app.config[name];
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
-    $("baiduApiKey").value = app.config.baiduApiKey || (app.getKey ? app.getKey() : "");
-    $("baiduSecretKey").value = app.config.baiduSecretKey || (app.getCredential ? app.getCredential("Baidu Secret Key") : "");
+    const loadBaiduCredentials = () => {
+      const provider = $("provider").value;
+      if (!["baidu", "baidu-general"].includes(provider)) { $("baiduApiKey").value = ""; $("baiduSecretKey").value = ""; return; }
+      const names = app.baiduCredentialNames(provider);
+      const current = app.config.provider === provider ? app.config : {};
+      const legacyApiKey = current.baiduApiKey || app.getCredential("Baidu API Key") || (app.getKey ? app.getKey() : "");
+      const legacySecretKey = current.baiduSecretKey || app.getCredential("Baidu Secret Key");
+      $("baiduApiKey").value = app.getCredential(names.apiKey) || (app.config.provider === provider ? legacyApiKey : "");
+      $("baiduSecretKey").value = app.getCredential(names.secretKey) || (app.config.provider === provider ? legacySecretKey : "");
+    };
+    loadBaiduCredentials();
+    $("useBaiduTrial").checked = Boolean(app.config.useBaiduTrial);
     try { $("key").value = app.getKey(); }
     catch (_) { $("status").textContent = "无法读取凭据存储，请解锁后重新打开设置。"; $("save").disabled = true; }
     const read = () => {
       const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked };
       for (const name of names) config[name] = ["delay", "timeout"].includes(name) ? Number($(name).value) : $(name).value;
       config.baiduApiKey = $("baiduApiKey").value.trim(); config.baiduSecretKey = $("baiduSecretKey").value.trim();
+      config.useBaiduTrial = $("useBaiduTrial").checked;
       return config;
     };
     $("save").addEventListener("click", async () => {
       $("save").disabled = true;
-      try { const config = read(); await app.saveConfig(config, config.provider === "baidu" ? $("baiduApiKey").value.trim() : $("key").value); $("status").textContent = "设置已保存，立即生效。"; }
+      try { const config = read(); await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value); $("status").textContent = "设置已保存，立即生效。"; }
       catch (e) { $("status").textContent = e.message; }
       finally { $("save").disabled = false; }
     });
-    const updateMethod = () => { $("body").disabled = $("method").value !== "POST"; };
-    $("method").addEventListener("change", updateMethod); updateMethod();
+    const setFieldVisible = (id, visible) => {
+      const field = $(id);
+      const controlLabel = id === "useBaiduTrial" ? field.parentElement : null;
+      const label = controlLabel ? controlLabel.previousElementSibling : field.previousElementSibling;
+      if (label) label.hidden = !visible;
+      (controlLabel || field).hidden = !visible;
+    };
+    const updateMethod = () => { $("body").disabled = $("method").value !== "POST" || $("provider").value !== "generic"; };
+    const updateFields = () => {
+      const provider = $("provider").value;
+      const generic = provider === "generic";
+      const baidu = ["baidu", "baidu-general"].includes(provider);
+      const trialAvailable = provider === "baidu-general";
+      const trial = trialAvailable && $("useBaiduTrial").checked;
+      for (const id of ["endpoint", "method", "key", "headers", "body", "meaningPath", "phoneticPath", "examplePath"]) setFieldVisible(id, generic);
+      setFieldVisible("useBaiduTrial", trialAvailable);
+      for (const id of ["baiduApiKey", "baiduSecretKey"]) setFieldVisible(id, baidu && !trial);
+      $("useBaiduTrial").disabled = !trialAvailable;
+      if (!trialAvailable) $("useBaiduTrial").checked = false;
+      updateMethod();
+    };
+    $("method").addEventListener("change", updateMethod);
+    const updateTrialStatus = () => { if ($("useBaiduTrial").checked) { const status = app.trialStatus(); $("status").textContent = status.configured ? `试用接口：今日剩余 ${status.remaining} / ${status.limit} 次。` : "试用密钥尚未内置，请联系插件发布者。"; } };
+    $("provider").addEventListener("change", () => { loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
+    $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
+    updateFields(); updateTrialStatus();
     $("test").addEventListener("click", async () => {
       const word = $("test-word").value.trim();
       if (!word || word.length > 80 || /\s/.test(word)) { $("status").textContent = "请输入一个测试单词。"; return; }

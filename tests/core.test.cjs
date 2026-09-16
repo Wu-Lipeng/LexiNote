@@ -40,9 +40,15 @@ test('required key validation', () => {
   assert.throws(() => C.request(c,'hello',''),/密钥/);
   assert.equal(C.request(c,'hello','s').headers.Authorization, 'Bearer s');
 });
+test('Baidu general mode accepts own credentials or local trial mode', () => {
+  assert.doesNotThrow(() => C.validate({ ...C.defaults, provider: 'baidu-general', baiduApiKey: 'key', baiduSecretKey: 'secret' }));
+  assert.doesNotThrow(() => C.validate({ ...C.defaults, provider: 'baidu-general', useBaiduTrial: true }));
+  assert.throws(() => C.validate({ ...C.defaults, provider: 'baidu-general' }), /百度 API Key/);
+});
 function runtime() {
   let sent = 0;
   const requests = [];
+  const prefs = { 'extensions.lexinote.config': JSON.stringify(base) };
   class FakeXHR {
     open(method,url) { this.method=method; this.url=url; }
     setRequestHeader() {}
@@ -50,12 +56,33 @@ function runtime() {
     abort() { this.aborted = true; this.onabort?.(); }
     respond(status, value) { this.status=status; this.responseText=JSON.stringify(value); this.onload?.(); }
   }
-  const context = vm.createContext({ LexiNoteCore:C, XMLHttpRequest:FakeXHR, URL, setTimeout,clearTimeout,
-    Zotero:{Prefs:{get:()=>JSON.stringify(base)}}, Services:{logins:{findLogins:()=>[]}} });
+  const context = vm.createContext({ LexiNoteCore:C, LexiNoteTrialCredentials:{baiduApiKey:'trial-key',baiduSecretKey:'trial-secret'}, XMLHttpRequest:FakeXHR, URL, setTimeout,clearTimeout,
+    Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}}}, Services:{logins:{findLogins:()=>[]}} });
   vm.runInContext(fs.readFileSync(require.resolve('../addon/runtime.js'),'utf8'),context);
   const app = vm.runInContext('new LexiNoteRuntime({id:"test",rootURI:""})',context);
-  return {app,requests,sent:()=>sent};
+  return {app,requests,prefs,sent:()=>sent};
 }
+test('local trial quota resets daily and stops after 50 requests', () => {
+  const {app}=runtime(); app.trialDate=()=> '2026-09-16';
+  for(let i=0;i<50;i++) app.consumeTrialQuota();
+  assert.deepEqual({...app.trialStatus()},{configured:true,used:50,limit:50,remaining:0});
+  assert.throws(()=>app.consumeTrialQuota(),/50\/50/);
+  app.trialDate=()=> '2026-09-17';
+  assert.deepEqual({...app.trialStatus()},{configured:true,used:0,limit:50,remaining:50});
+});
+test('provider credentials are stored separately and removed from configuration JSON', async () => {
+  const {app}=runtime(); const stored={};
+  app.setCredential=async(name,value)=>{stored[name]=value;};
+  app.setKey=async value=>{stored['Generic API Key']=value;};
+  await app.saveConfig({...C.defaults,provider:'baidu-general',baiduApiKey:'baidu-key',baiduSecretKey:'baidu-secret'},'ignored');
+  assert.deepEqual(stored,{'Baidu General API Key':'baidu-key','Baidu General Secret Key':'baidu-secret'});
+  assert.equal(app.config.baiduApiKey,''); assert.equal(app.config.baiduSecretKey,'');
+  await app.saveConfig({...C.defaults,provider:'baidu',baiduApiKey:'dictionary-key',baiduSecretKey:'dictionary-secret'},'ignored');
+  assert.equal(stored['Baidu Dictionary API Key'],'dictionary-key');
+  assert.equal(stored['Baidu Dictionary Secret Key'],'dictionary-secret');
+  await app.saveConfig({...C.defaults,endpoint:'https://example.org/?q={{word}}'},'generic-key');
+  assert.equal(stored['Generic API Key'],'generic-key');
+});
 test('cache hit; configuration changes invalidate; secrets not part of cache keys', async () => {
   const {app,requests,sent}=runtime();
   const first=app.lookup('hello'); requests[0].respond(200,{translation:'你好'});
