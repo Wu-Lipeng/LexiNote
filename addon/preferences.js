@@ -20,7 +20,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       }
       const names = app.baiduCredentialNames(provider);
       const current = app.config.provider === provider ? app.config : {};
-      const legacyApiKey = current.baiduApiKey || (provider === "baidu" ? app.getCredential("Baidu API Key") : "");
+      const legacyApiKey = current.baiduApiKey || (provider === "baidu" ? (app.getCredential("Baidu API Key") || app.getKey()) : "");
       const legacySecretKey = current.baiduSecretKey || (provider === "baidu" ? app.getCredential("Baidu Secret Key") : "");
       $("baiduApiKey").value = app.getCredential(names.apiKey) || legacyApiKey;
       $("baiduSecretKey").value = app.getCredential(names.secretKey) || legacySecretKey;
