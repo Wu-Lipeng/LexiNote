@@ -15,6 +15,13 @@ var LexiNoteCore = (() => {
     return value.length <= 80 && /^[\p{L}\p{M}]+(?:[-'’][\p{L}\p{M}]+)*$/u.test(value)
       ? value : "";
   }
+  function wordCandidates(word) {
+    const value = String(word || "");
+    // Only ordinary title-case English words need a lower-case fallback.
+    // Acronyms such as USA and mixed-case proper names remain untouched.
+    if (!/^[A-Z][a-z]+(?:['-][A-Za-z]+)*$/.test(value)) return [value];
+    return [value, value[0].toLowerCase() + value.slice(1)];
+  }
   function normalize(word) { return word.normalize("NFC").toLocaleLowerCase("en-US"); }
   function json(value, label) {
     try { return JSON.parse(value); }
@@ -121,6 +128,6 @@ var LexiNoteCore = (() => {
   function escape(text) {
     return String(text).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   }
-  return { defaults, wordFrom, normalize, validate, request, response, valuesAt, escape };
+  return { defaults, wordFrom, wordCandidates, normalize, validate, request, response, valuesAt, escape };
 })();
 if (typeof module !== "undefined") module.exports = LexiNoteCore;

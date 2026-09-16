@@ -226,6 +226,17 @@ var LexiNoteRuntime = class {
     }
     return result;
   }
+  async lookupCandidates(word, input = this.config, owner = {}) {
+    const matches = [], errors = [];
+    for (const candidate of LexiNoteCore.wordCandidates(word)) {
+      try { matches.push({ word: candidate, result: await this.lookup(candidate, input, undefined, owner) }); }
+      catch (error) { errors.push(error); }
+    }
+    if (matches.length) return matches;
+    const messages = errors.map(error => error?.message || "").filter(Boolean);
+    if (messages.length && messages.every(text => /没有返回结果|没有找到释义/.test(text))) throw new Error("未找到可用释义。");
+    throw errors[0] || new Error("未找到可用释义。");
+  }
   async lookupBaidu(word, config, owner = {}) {
     const trial = config.useBaiduTrial;
     const trialCredentials = this.trialCredentials();
@@ -310,14 +321,16 @@ var LexiNoteRuntime = class {
       b.style.cssText = "font:inherit;border:1px solid #8888;border-radius:5px;padding:4px 9px;cursor:pointer;color:inherit;background:transparent;";
       return b;
     };
+    const candidatePicker = make("select"); candidatePicker.hidden = true;
+    candidatePicker.style.cssText = "font:inherit;max-width:180px;padding:3px;";
     const save = button("保存到生词本"); save.disabled = true;
     const retry = button("重试"); retry.hidden = true;
     const close = button("关闭");
     const status = make("div"); status.setAttribute("aria-live", "polite");
     status.style.cssText = "font-size:12px;margin-top:6px;";
-    actions.append(save, retry, close);
+    actions.append(candidatePicker, save, retry, close);
     box.append(heading, detail, actions, status);
-    let timer, observer, disposed = false, result, highlightDraft;
+    let timer, observer, disposed = false, result, matches = [], highlightDraft;
     const owner = {};
     const popup = {
       dispose: () => {
@@ -335,13 +348,30 @@ var LexiNoteRuntime = class {
       box.addEventListener(name, event => event.stopPropagation());
     }
     box.addEventListener("keydown", event => { if (event.key === "Escape") popup.dispose(); });
+    const formatResult = entry => [entry.result.phonetic, entry.result.meaning, entry.result.example && "例句\n" + entry.result.example].filter(Boolean).join("\n\n");
+    const selectMatch = index => {
+      const entry = matches[index];
+      if (!entry) return;
+      result = entry.result;
+      save.textContent = "保存「" + entry.word + "」";
+    };
+    candidatePicker.addEventListener("change", () => selectMatch(Number(candidatePicker.value)));
     const run = async () => {
       if (disposed || !box.isConnected) { popup.dispose(); return; }
-      retry.hidden = true; detail.textContent = "正在查词…"; save.disabled = true;
+      retry.hidden = true; detail.textContent = "正在查词…"; save.disabled = true; candidatePicker.hidden = true; candidatePicker.replaceChildren(); matches = []; result = undefined;
       try {
-        result = await this.lookup(word, this.config, undefined, owner);
+        matches = await this.lookupCandidates(word, this.config, owner);
         if (disposed) return;
-        detail.textContent = [result.phonetic, result.meaning, result.example && "例句\n" + result.example].filter(Boolean).join("\n\n");
+        detail.textContent = matches.length === 1
+          ? formatResult(matches[0])
+          : matches.map(entry => "【" + entry.word + "】\n" + formatResult(entry)).join("\n\n");
+        if (matches.length > 1) {
+          for (const [index, entry] of matches.entries()) {
+            const option = make("option", entry.word); option.value = String(index); candidatePicker.append(option);
+          }
+          candidatePicker.hidden = false;
+        }
+        selectMatch(0);
         save.disabled = false;
       } catch (error) {
         if (!disposed) { detail.textContent = error.message; retry.hidden = false; }

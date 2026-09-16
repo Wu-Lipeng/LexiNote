@@ -11,6 +11,13 @@ test('Unicode single words; reject sentences and oversized selection', () => {
   assert.equal(C.wordFrom('a'.repeat(81)), '');
   assert.equal(C.wordFrom('<script>'), '');
 });
+test('title-case English words include a lower-case lookup candidate', () => {
+  assert.deepEqual(C.wordCandidates('Present'), ['Present', 'present']);
+  assert.deepEqual(C.wordCandidates('present'), ['present']);
+  assert.deepEqual(C.wordCandidates('USA'), ['USA']);
+  assert.deepEqual(C.wordCandidates("Can't"), ["Can't", "can't"]);
+  assert.deepEqual(C.wordCandidates("O'Reilly"), ["O'Reilly"]);
+});
 test('JSON substitution escapes quotes/newlines and preserves numeric types', () => {
   const c = C.validate({ ...base, method: 'POST', body: '{"q":"{{word}}","secret":"{{apiKey}}","n":2}' });
   const r = C.request(c, 'a"\\b', 'secret"\nvalue');
@@ -93,6 +100,20 @@ test('saved Baidu credentials keep the dictionary provider configured', () => {
     'Baidu Dictionary Secret Key':'dictionary-secret'
   })[name] || '';
   assert.equal(app.isConfigured(),true);
+});
+test('candidate lookup keeps successful spellings and reports no usable result', async () => {
+  const {app}=runtime();
+  app.lookup=async word=>{
+    if (word === 'Present') return {meaning:'礼物',phonetic:'',example:''};
+    if (word === 'present') return {meaning:'现在',phonetic:'',example:''};
+    throw new Error('响应中没有找到释义，请检查释义字段路径或接口返回内容。');
+  };
+  assert.deepEqual(JSON.parse(JSON.stringify(await app.lookupCandidates('Present'))), [
+    {word:'Present',result:{meaning:'礼物',phonetic:'',example:''}},
+    {word:'present',result:{meaning:'现在',phonetic:'',example:''}}
+  ]);
+  app.lookup=async()=>{ throw new Error('百度词典没有返回结果。'); };
+  await assert.rejects(app.lookupCandidates('Absent'), /未找到可用释义/);
 });
 test('cache hit; configuration changes invalidate; secrets not part of cache keys', async () => {
   const {app,requests,sent}=runtime();
