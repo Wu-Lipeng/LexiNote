@@ -1,11 +1,11 @@
-# LexiNote 划词生词本 0.1.7
+# LexiNote 划词生词本 0.1.8
 
 在 Zotero 内置 PDF 阅读器中选中一个单词，显示释义浮窗；点击“保存到生词本”，将单词追加到所属文献的同一条子笔记。
 
 ## 安装和使用
 
 1. 在 Zotero 中打开“工具 → 插件”（部分版本称“附加组件”）。
-2. 点击右上角齿轮，选择“从文件安装插件”，选择 `lexinote-0.1.7.xpi`。
+2. 点击右上角齿轮，选择“从文件安装插件”，选择 `lexinote-0.1.8.xpi`。
 3. 打开 Zotero 的设置，进入“划词生词本”，填写接口配置及密钥。
 4. 点击“测试当前配置”。测试成功后点击“保存设置”。测试按钮本身不会保存配置。
 5. 在一篇有父条目的 PDF 中双击一个单词或拖动选中一个单词，等待浮窗显示，然后点击“保存到生词本”。
@@ -75,7 +75,7 @@
 
 默认延迟 350 ms 查询，选择多个单词或超过 80 字符时不查询。最多并行 3 个请求，默认超时 12 秒，响应上限 1 MB。最近 200 个词的查询结果缓存在内存中，15 分钟失效。换词、关闭浮窗、停用插件会取消对应查询；保存设置会清空缓存。启动时不扫描文献库，也不建立全文索引。
 
-当前版本通过 GitHub Releases 分发。Zotero 会从仓库中的 `update.json` 检查新版本；发布新版本时需要同步上传新的 XPI 并更新该文件。
+当前版本通过 GitHub Releases 分发。Zotero 会从仓库中的 `update.json` 检查新版本。推送 `v*` 标签会触发工作流构建 XPI 并创建 GitHub Release；发布新版本时仍需在同一提交中手动更新 `update.json`，使版本号、下载地址和兼容范围与新 XPI 一致。
 
 ## 开发
 
@@ -102,4 +102,3 @@ node --test tests/dom.test.cjs
 - https://www.zotero.org/support/dev/zotero_9_for_developers
 - https://www.zotero.org/support/dev/zotero_10_for_developers
 - https://www.zotero.org/support/dev/client_coding/javascript_api
-
