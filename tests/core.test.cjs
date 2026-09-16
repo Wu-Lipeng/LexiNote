@@ -83,6 +83,15 @@ test('provider credentials are stored separately and removed from configuration 
   await app.saveConfig({...C.defaults,endpoint:'https://example.org/?q={{word}}'},'generic-key');
   assert.equal(stored['Generic API Key'],'generic-key');
 });
+test('saved Baidu credentials keep the dictionary provider configured', () => {
+  const {app}=runtime();
+  app.config={...C.defaults,provider:'baidu'};
+  app.getCredential=name=>({
+    'Baidu Dictionary API Key':'dictionary-key',
+    'Baidu Dictionary Secret Key':'dictionary-secret'
+  })[name] || '';
+  assert.equal(app.isConfigured(),true);
+});
 test('cache hit; configuration changes invalidate; secrets not part of cache keys', async () => {
   const {app,requests,sent}=runtime();
   const first=app.lookup('hello'); requests[0].respond(200,{translation:'你好'});

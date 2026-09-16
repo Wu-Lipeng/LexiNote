@@ -155,7 +155,13 @@ var LexiNoteRuntime = class {
     return { ...status, used: status.used + 1, remaining: status.remaining - 1 };
   }
   isConfigured(config = this.config) {
-    if (["baidu", "baidu-general"].includes(config.provider)) return config.useBaiduTrial ? this.trialStatus().configured : Boolean(config.baiduApiKey?.trim() && config.baiduSecretKey?.trim());
+    if (["baidu", "baidu-general"].includes(config.provider)) {
+      if (config.useBaiduTrial) return this.trialStatus().configured;
+      const names = this.baiduCredentialNames(config.provider);
+      const apiKey = config.baiduApiKey?.trim() || this.getCredential(names.apiKey) || this.getCredential("Baidu API Key") || this.getCredential("API key");
+      const secretKey = config.baiduSecretKey?.trim() || this.getCredential(names.secretKey) || this.getCredential("Baidu Secret Key");
+      return Boolean(apiKey && secretKey);
+    }
     return Boolean(config.endpoint?.trim());
   }
   async lookup(word, input = this.config, keyOverride, owner = {}) {
