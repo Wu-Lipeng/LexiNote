@@ -292,7 +292,7 @@ var LexiNoteRuntime = class {
     if (phonetic) lines.push("/" + phonetic + "/");
     for (const symbol of symbols) for (const part of (symbol.parts || [])) {
       const pos = String(part.part || "").trim(); const means = (part.means || []).map(String).map(x => x.trim()).filter(Boolean);
-      if (pos && means.length && !seen.has(pos)) { seen.add(pos); lines.push(pos + "；" + means.join("；")); }
+      if (pos && means.length && !seen.has(pos)) { seen.add(pos); lines.push(pos + " " + means.join("；")); }
     }
     for (const item of (wr.edict?.item || [])) {
       const pos = String(item.pos || "").trim(); const defs = (item.tr_group || []).flatMap(g => g.tr || []).map(String).filter(Boolean);
