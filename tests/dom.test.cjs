@@ -50,16 +50,22 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const reader={itemID:a.id};let popup;
       const event=word=>({reader,doc:document,params:{annotation:{text:word,pageLabel:'4',position:{pageIndex:3}}},append:node=>{popup=node;document.body.append(node);}});
       app.selection(event('delta'));
+      popup=document.querySelector('.lexinote-popup');
       await new Promise(r=>setTimeout(r,180));
       check(popup.textContent.includes('释义 delta'),'Popup displays lookup result');
-      popup.querySelector('button').click();await app.noteQueue;await new Promise(r=>setTimeout(r,10));
+      const queryInput=popup.querySelector('input[aria-label="查询单词"]');
+      check(queryInput.value==='delta','Popup query input starts with selected word');
+      queryInput.value='gamma';[...popup.querySelectorAll('button')].find(b=>b.textContent==='查询').click();
+      await new Promise(r=>setTimeout(r,10));
+      check(popup.textContent.includes('释义 delta')&&popup.textContent.includes('释义 gamma')&&queryInput.value==='gamma','Manual query appends a result and updates the input');
+      [...popup.querySelectorAll('button')].find(b=>b.textContent==='保存 delta').click();await app.noteQueue;await new Promise(r=>setTimeout(r,10));
       check(note.getNote().includes('delta')&&popup.textContent.includes('已追加'),'Popup save writes to originating note');
-      const old=popup;app.selection(event('epsilon'));check(!old.isConnected,'New selection removes old popup');
+      const old=popup;app.selection(event('epsilon'));popup=document.querySelector('.lexinote-popup');check(!old.isConnected,'New selection removes old popup');
       await new Promise(r=>setTimeout(r,180));popup.remove();await new Promise(r=>setTimeout(r,10));check(app.popups.size===0,'Disconnected popup cleans up');
       note.deleted=true;const replacement=await app.saveWord(entry('zeta'));check(replacement.noteID!==note.id,'Trashed note is not reused');
       return results;
     });
-    assert.equal(results.length,14);
+    assert.equal(results.length,16);
     const markup=fs.readFileSync(path.resolve(__dirname,'../addon/preferences.xhtml'),'utf8');
     await page.evaluate(markup=>{
       const parsed=new DOMParser().parseFromString(markup,'application/xml');
@@ -73,6 +79,6 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     assert.equal(await page.evaluate(()=>Zotero.LexiNote.config.delay),300);
     await page.evaluate(()=>document.getElementById('lexinote-test').click());
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('测试成功'));
-    console.log('14 DOM/data assertions plus settings save and test passed (simulated Zotero).');
+    console.log('16 DOM/data assertions plus settings save and test passed (simulated Zotero).');
   } finally {await browser.close();}
 });

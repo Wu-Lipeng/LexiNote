@@ -340,15 +340,25 @@ var LexiNoteRuntime = class {
     const close = button("关闭");
     const status = make("div"); status.setAttribute("aria-live", "polite");
     status.style.cssText = "font-size:12px;margin-top:6px;";
+    const queryForm = make("div");
+    queryForm.style.cssText = "display:flex;gap:8px;align-items:center;margin-top:10px;";
+    const queryInput = make("input");
+    queryInput.type = "text";
+    queryInput.value = word;
+    queryInput.maxLength = 80;
+    queryInput.setAttribute("aria-label", "查询单词");
+    queryInput.style.cssText = "box-sizing:border-box;flex:1;min-width:0;padding:5px 7px;border:1px solid #8888;border-radius:5px;background:Canvas;color:CanvasText;font:inherit;";
+    const queryButton = button("查询");
+    queryForm.append(queryInput, queryButton);
     actions.append(retry, close);
-    box.append(heading, detail, actions, status);
-    let timer, observer, disposed = false, matches = [], highlightDraft;
-    const owner = {};
+    box.append(heading, detail, actions, status, queryForm);
+    let timer, observer, disposed = false, resultGroups = [], highlightDraft, retryWord = word;
+    const owners = new Set();
     const popup = {
       dispose: () => {
         if (disposed) return;
         disposed = true;
-        clearTimeout(timer); owner.cancel?.(); observer?.disconnect();
+        clearTimeout(timer); for (const owner of owners) owner.cancel?.(); observer?.disconnect();
         doc.defaultView?.removeEventListener("unload", popup.dispose);
         box.remove(); this.popups.delete(popup);
         if (this.byReader.get(reader) === popup) this.byReader.delete(reader);
@@ -379,34 +389,66 @@ var LexiNoteRuntime = class {
     };
     const renderMatches = () => {
       detail.replaceChildren();
-      for (const entry of matches) {
-        const section = make("div");
-        section.style.cssText = "padding:8px 0;";
-        if (matches.length > 1) {
-          const title = make("strong", entry.word);
-          title.style.cssText = "display:block;margin-bottom:4px;";
-          section.append(title);
+      for (const group of resultGroups) {
+        const groupElement = make("div");
+        groupElement.style.cssText = "padding:8px 0;border-top:1px solid #8884;";
+        if (!group.initial || resultGroups.length > 1) {
+          const groupTitle = make("strong", group.word);
+          groupTitle.style.cssText = "display:block;margin-bottom:4px;";
+          groupElement.append(groupTitle);
         }
-        section.append(make("div", formatResult(entry)));
-        const saveButton = button("保存 " + entry.word);
-        saveButton.style.marginTop = "8px";
-        saveButton.addEventListener("click", () => saveMatch(entry, saveButton));
-        section.append(saveButton);
-        detail.append(section);
+        for (const entry of group.entries) {
+          const section = make("div");
+          section.style.cssText = "padding:4px 0;";
+          if (group.entries.length > 1) {
+            const title = make("strong", entry.word);
+            title.style.cssText = "display:block;margin-bottom:4px;";
+            section.append(title);
+          }
+          section.append(make("div", formatResult(entry)));
+          const saveButton = button("保存 " + entry.word);
+          saveButton.style.marginTop = "8px";
+          saveButton.addEventListener("click", () => saveMatch(entry, saveButton));
+          section.append(saveButton);
+          groupElement.append(section);
+        }
+        detail.append(groupElement);
       }
     };
-    const run = async () => {
+    const run = async (queryWord, initial = false) => {
       if (disposed || !box.isConnected) { popup.dispose(); return; }
-      retry.hidden = true; detail.textContent = "正在查词…"; matches = [];
+      const owner = {};
+      owners.add(owner);
+      retry.hidden = true; queryButton.disabled = true; status.textContent = "正在查词…";
+      if (!resultGroups.length) detail.textContent = "正在查词…";
       try {
-        matches = await this.lookupCandidates(word, this.config, owner);
+        const entries = await this.lookupCandidates(queryWord, this.config, owner);
         if (disposed) return;
+        resultGroups.push({ word: queryWord, entries, initial });
         renderMatches();
+        queryInput.value = queryWord;
+        status.textContent = "";
       } catch (error) {
-        if (!disposed) { detail.textContent = error.message; retry.hidden = false; }
+        if (!disposed) {
+          if (!resultGroups.length) detail.textContent = error.message;
+          else status.textContent = error.message;
+          retryWord = queryWord; retry.hidden = false;
+        }
+      } finally {
+        owners.delete(owner);
+        if (!disposed) queryButton.disabled = false;
       }
     };
-    retry.addEventListener("click", run);
+    const submitQuery = () => {
+      const queryWord = LexiNoteCore.wordFrom(queryInput.value);
+      if (!queryWord) { status.textContent = "请输入一个单词。"; return; }
+      run(queryWord);
+    };
+    retry.addEventListener("click", () => run(retryWord));
+    queryButton.addEventListener("click", submitQuery);
+    queryInput.addEventListener("keydown", event => {
+      if (event.key === "Enter") { event.preventDefault(); submitQuery(); }
+    });
     this.popups.add(popup); this.byReader.set(reader, popup);
     doc.defaultView.addEventListener("unload", popup.dispose, { once: true });
     // The reader's native selection popup constrains children to a narrow column.
@@ -440,7 +482,7 @@ var LexiNoteRuntime = class {
       if (!box.isConnected) { popup.dispose(); return; }
       observer = new doc.defaultView.MutationObserver(() => { if (!box.isConnected) popup.dispose(); });
       observer.observe(doc.documentElement, { childList: true, subtree: true });
-      run();
+      run(word, true);
     }, this.config.delay);
   }
   saveWord(entry) {
