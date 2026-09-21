@@ -74,6 +74,18 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     },markup);
     await page.addScriptTag({path:path.resolve(__dirname,'../addon/preferences.js')});
     await page.evaluate(()=>LexiNotePreferences.init());
+    const restored=await page.evaluate(()=>{
+      const $=id=>document.getElementById('lexinote-'+id);
+      $('enabled').checked=false;$('autoHighlight').checked=true;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
+      $('restoreFeatures').click();
+      return {
+        featureHeading:$('feature-settings').querySelector('h2').textContent,
+        interfaceHeading:$('interface-settings').querySelector('h2').textContent,
+        enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
+        status:$('status').textContent
+      };
+    });
+    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:false,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。'});
     await page.evaluate(()=>{document.getElementById('lexinote-delay').value='300';document.getElementById('lexinote-save').click();});
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('设置已保存'));
     assert.equal(await page.evaluate(()=>Zotero.LexiNote.config.delay),300);

@@ -2,13 +2,26 @@
       xmlns:html="http://www.w3.org/1999/xhtml" onload="window.LexiNotePreferences.init()">
   <html:div id="lexinote-settings" style="max-width:760px;line-height:1.6">
     <html:p>阅读时选中一个单词，自动显示释义；点击保存后，追加到该文献唯一的“生词本”笔记。</html:p>
-    <html:p><html:label><html:input id="lexinote-enabled" type="checkbox"/> 启用划词查询</html:label></html:p>
-    <html:p><html:label><html:input id="lexinote-autoHighlight" type="checkbox"/> 保存到生词本后自动标记选中文本</html:label></html:p>
-    <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
-      <html:label for="lexinote-highlightColor">标记颜色</html:label>
-      <html:input id="lexinote-highlightColor" type="color" value="#c0c0c0"/>
-      <html:label for="lexinote-highlightType">标记样式</html:label>
-      <html:select id="lexinote-highlightType"><html:option value="highlight">高亮</html:option><html:option value="underline">下划线</html:option></html:select>
+    <html:section id="lexinote-feature-settings" style="margin:16px 0;padding:14px;border:1px solid #8885;border-radius:6px">
+      <html:h2 style="margin:0 0 10px;font-size:1.15em">功能设置</html:h2>
+      <html:p><html:label><html:input id="lexinote-enabled" type="checkbox"/> 启用划词查询</html:label></html:p>
+      <html:p><html:label><html:input id="lexinote-autoHighlight" type="checkbox"/> 保存到生词本后自动标记选中文本</html:label></html:p>
+      <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
+        <html:label for="lexinote-highlightColor">标记颜色</html:label>
+        <html:input id="lexinote-highlightColor" type="color" value="#c0c0c0"/>
+        <html:label for="lexinote-highlightType">标记样式</html:label>
+        <html:select id="lexinote-highlightType"><html:option value="highlight">高亮</html:option><html:option value="underline">下划线</html:option></html:select>
+        <html:label for="lexinote-delay">划词延迟 (ms)</html:label>
+        <html:div><html:input id="lexinote-delay" type="number" min="150" max="3000"/><html:small style="display:block">选中单词后等待多久开始查询。范围为 150–3000 ms；较长的延迟可减少误触发。</html:small></html:div>
+        <html:label for="lexinote-timeout">请求超时 (ms)</html:label>
+        <html:div><html:input id="lexinote-timeout" type="number" min="1000" max="60000"/><html:small style="display:block">等待词典接口返回的最长时间。范围为 1000–60000 ms；超时后可在浮窗中重试。</html:small></html:div>
+      </html:div>
+      <html:p style="margin-bottom:0"><html:button id="lexinote-restoreFeatures" type="button">恢复默认设置</html:button> <html:small>只恢复本区域设置，不影响接口配置或已保存凭据。</html:small></html:p>
+    </html:section>
+    <html:section id="lexinote-interface-settings" style="margin:16px 0;padding:14px;border:1px solid #8885;border-radius:6px">
+      <html:h2 style="margin:0 0 10px;font-size:1.15em">接口设置</html:h2>
+      <html:p>启用且配置完成后，选中的单词会发送到配置的接口。不会发送整篇文献。</html:p>
+      <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
     </html:div>
     <html:p>启用且配置完成后，选中的单词会发送到配置的接口。不会发送整篇文献。</html:p>
     <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
@@ -38,16 +51,13 @@
       <html:input id="lexinote-examplePath" type="text" placeholder="可留空"/>
       <html:label for="lexinote-target">目标语言</html:label>
       <html:input id="lexinote-target" type="text"/>
-      <html:label for="lexinote-delay">划词延迟 (ms)</html:label>
-      <html:input id="lexinote-delay" type="number" min="150" max="3000"/>
-      <html:label for="lexinote-timeout">请求超时 (ms)</html:label>
-      <html:input id="lexinote-timeout" type="number" min="1000" max="60000"/>
-    </html:div>
-    <html:p>占位符：<html:code>{{word}}</html:code> 单词、<html:code>{{target}}</html:code> 目标语言、<html:code>{{apiKey}}</html:code> 密钥。URL 中自动编码；JSON 中自动转义。</html:p>
-    <html:p>Bearer 认证的请求头示例：<html:code>{"Authorization":"Bearer {{apiKey}}"}</html:code>。密钥单独存入 Zotero 的凭据存储，请勿直接写进模板。清空密钥并保存即可删除。</html:p>
-    <html:p>响应路径支持 <html:code>data.translation</html:code>、<html:code>meanings[0].text</html:code> 和 <html:code>meanings[*].definitions[*].definition</html:code>。根节点填写 <html:code>$</html:code>。仅支持 JSON 响应，不执行接口返回的 HTML 或脚本。</html:p>
-    <html:p>需要动态签名、OAuth 或流式响应的接口须另行适配。</html:p>
-    <html:p>试用接口仅适用于百度通用版，每日最多查询 50 次。</html:p>
+      </html:div>
+      <html:p>占位符：<html:code>{{word}}</html:code> 单词、<html:code>{{target}}</html:code> 目标语言、<html:code>{{apiKey}}</html:code> 密钥。URL 中自动编码；JSON 中自动转义。</html:p>
+      <html:p>Bearer 认证的请求头示例：<html:code>{"Authorization":"Bearer {{apiKey}}"}</html:code>。密钥单独存入 Zotero 的凭据存储，请勿直接写进模板。清空密钥并保存即可删除。</html:p>
+      <html:p>响应路径支持 <html:code>data.translation</html:code>、<html:code>meanings[0].text</html:code> 和 <html:code>meanings[*].definitions[*].definition</html:code>。根节点填写 <html:code>$</html:code>。仅支持 JSON 响应，不执行接口返回的 HTML 或脚本。</html:p>
+      <html:p>需要动态签名、OAuth 或流式响应的接口须另行适配。</html:p>
+      <html:p>试用接口仅适用于百度通用版，每日最多查询 50 次。</html:p>
+    </html:section>
     <html:div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <html:button id="lexinote-save" type="button">保存设置</html:button>
       <html:input id="lexinote-test-word" type="text" value="example" aria-label="测试单词" style="width:110px"/>

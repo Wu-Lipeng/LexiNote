@@ -41,6 +41,19 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       config.useBaiduTrial = $("useBaiduTrial").checked;
       return config;
     };
+    const restoreFeatureDefaults = () => {
+      const defaults = typeof LexiNoteCore !== "undefined" ? LexiNoteCore.defaults : {
+        enabled: true, autoHighlight: false, highlightColor: "#c0c0c0", highlightType: "highlight", delay: 350, timeout: 12000
+      };
+      $("enabled").checked = defaults.enabled;
+      $("autoHighlight").checked = defaults.autoHighlight;
+      $("highlightColor").value = defaults.highlightColor;
+      $("highlightType").value = defaults.highlightType;
+      $("delay").value = defaults.delay;
+      $("timeout").value = defaults.timeout;
+      $("status").textContent = "已恢复功能默认设置。请点击“保存设置”以应用。";
+    };
+    $("restoreFeatures").addEventListener("click", restoreFeatureDefaults);
     $("save").addEventListener("click", async () => {
       $("save").disabled = true;
       try { const config = read(); await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value); $("status").textContent = "设置已保存，立即生效。"; }
