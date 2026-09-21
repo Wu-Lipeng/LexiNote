@@ -79,17 +79,19 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       let confirmation='';window.confirm=message=>{confirmation=message;return true;};
       $('enabled').checked=false;$('autoHighlight').checked=true;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
       $('restoreFeatures').click();
+      const unloadEvent=new Event('beforeunload',{cancelable:true});window.dispatchEvent(unloadEvent);
       return {
         featureHeading:$('feature-settings').querySelector('h2').textContent,
         interfaceHeading:$('interface-settings').querySelector('h2').textContent,
         enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
-        status:$('status').textContent,confirmation
+        status:$('status').textContent,confirmation,unloadWarning:unloadEvent.defaultPrevented
       };
     });
-    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。'});
+    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。',unloadWarning:true});
     await page.evaluate(()=>{document.getElementById('lexinote-delay').value='300';document.getElementById('lexinote-save').click();});
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('设置已保存'));
     assert.equal(await page.evaluate(()=>Zotero.LexiNote.config.delay),300);
+    assert.equal(await page.evaluate(()=>{const event=new Event('beforeunload',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),false);
     await page.evaluate(()=>document.getElementById('lexinote-test').click());
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('测试成功'));
     console.log('16 DOM/data assertions plus settings save and test passed (simulated Zotero).');

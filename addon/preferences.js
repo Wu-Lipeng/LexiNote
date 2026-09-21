@@ -9,6 +9,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
     const baiduDrafts = {};
+    let dirty = false;
     let previousProvider = $("provider").value;
     const loadBaiduCredentials = () => {
       const provider = $("provider").value;
@@ -52,12 +53,13 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("highlightType").value = defaults.highlightType;
       $("delay").value = defaults.delay;
       $("timeout").value = defaults.timeout;
+      dirty = true;
       $("status").textContent = "已恢复功能默认设置。请点击“保存设置”以应用。";
     };
     $("restoreFeatures").addEventListener("click", restoreFeatureDefaults);
     $("save").addEventListener("click", async () => {
       $("save").disabled = true;
-      try { const config = read(); await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value); $("status").textContent = "设置已保存，立即生效。"; }
+      try { const config = read(); await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value); dirty = false; $("status").textContent = "设置已保存，立即生效。"; }
       catch (e) { $("status").textContent = e.message; }
       finally { $("save").disabled = false; }
     });
@@ -87,6 +89,17 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
+    const settingControls = [...names, "enabled", "autoHighlight", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
+    for (const id of settingControls) {
+      $(id).addEventListener("input", () => { dirty = true; });
+      $(id).addEventListener("change", () => { dirty = true; });
+    }
+    window.addEventListener("beforeunload", event => {
+      if (!dirty) return;
+      event.preventDefault();
+      event.returnValue = "设置尚未保存，确定关闭吗？";
+      return event.returnValue;
+    });
     $("test").addEventListener("click", async () => {
       const word = $("test-word").value.trim();
       if (!word || word.length > 80 || /\s/.test(word)) { $("status").textContent = "请输入一个测试单词。"; return; }
