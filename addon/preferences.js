@@ -57,12 +57,23 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("status").textContent = "已恢复功能默认设置。请点击“保存设置”以应用。";
     };
     $("restoreFeatures").addEventListener("click", restoreFeatureDefaults);
-    $("save").addEventListener("click", async () => {
+    const saveConfig = async (closeAfterSave = false) => {
       $("save").disabled = true;
-      try { const config = read(); await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value); dirty = false; $("status").textContent = "设置已保存，立即生效。"; }
+      try {
+        const config = read();
+        await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value);
+        dirty = false;
+        $("status").textContent = "设置已保存，立即生效。";
+        return true;
+      }
       catch (e) { $("status").textContent = e.message; }
-      finally { $("save").disabled = false; }
-    });
+      finally {
+        $("save").disabled = false;
+        if (closeAfterSave) { dirty = false; window.close(); }
+      }
+      return false;
+    };
+    $("save").addEventListener("click", () => saveConfig());
     const setFieldVisible = (id, visible) => {
       const field = $(id);
       const controlLabel = id === "useBaiduTrial" ? field.parentElement : null;
@@ -96,7 +107,12 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     }
     window.addEventListener("close", event => {
       if (!dirty) return;
-      if (!window.confirm("设置尚未保存，确定关闭设置窗口吗？")) event.preventDefault();
+      event.preventDefault();
+      const prompt = Services.prompt;
+      const flags = prompt.BUTTON_POS_0 * prompt.BUTTON_TITLE_IS_STRING + prompt.BUTTON_POS_1 * prompt.BUTTON_TITLE_IS_STRING;
+      const choice = prompt.confirmEx(window, "未保存的设置", "设置尚未保存。请选择保存或不保存后关闭设置窗口。", flags, "保存", "不保存", null, null, {});
+      if (choice === 0) saveConfig(true);
+      else { dirty = false; window.close(); }
     });
     $("test").addEventListener("click", async () => {
       const word = $("test-word").value.trim();

@@ -24,6 +24,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       }
       let pref='{}';
       window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},Reader:{unregisterEventListener(){}}};
+      window.Services={prompt:{BUTTON_POS_0:1,BUTTON_POS_1:256,BUTTON_TITLE_IS_STRING:127,confirmEx:()=>1}};
       const app=new LexiNoteRuntime({id:'test',rootURI:''});window.Zotero.LexiNote=app;
       app.getKey=()=>'';app.setKey=async()=>{};
       const p=new Item('journalArticle');await p.saveTx();
@@ -79,16 +80,28 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       let confirmation='';window.confirm=message=>{confirmation=message;return true;};
       $('enabled').checked=false;$('autoHighlight').checked=true;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
       $('restoreFeatures').click();
-      let closeConfirmation='';window.confirm=message=>{closeConfirmation=message;return false;};
-      const closeEvent=new Event('close',{cancelable:true});window.dispatchEvent(closeEvent);
       return {
         featureHeading:$('feature-settings').querySelector('h2').textContent,
         interfaceHeading:$('interface-settings').querySelector('h2').textContent,
         enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
-        status:$('status').textContent,confirmation,closeConfirmation,closePrevented:closeEvent.defaultPrevented
+        status:$('status').textContent,confirmation
       };
     });
-    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。',closeConfirmation:'设置尚未保存，确定关闭设置窗口吗？',closePrevented:true});
+    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。'});
+    const saveOnClose=await page.evaluate(async()=>{
+      let closeCalls=0;window.close=()=>closeCalls++;
+      let promptArgs;Services.prompt.confirmEx=(...args)=>{promptArgs=args;return 0;};
+      const event=new Event('close',{cancelable:true});window.dispatchEvent(event);
+      await new Promise(resolve=>setTimeout(resolve,0));
+      return {prevented:event.defaultPrevented,title:promptArgs[1],message:promptArgs[2],save:promptArgs[4],discard:promptArgs[5],closeCalls};
+    });
+    assert.deepEqual(saveOnClose,{prevented:true,title:'未保存的设置',message:'设置尚未保存。请选择保存或不保存后关闭设置窗口。',save:'保存',discard:'不保存',closeCalls:1});
+    const discardOnClose=await page.evaluate(()=>{
+      const $=id=>document.getElementById('lexinote-'+id);$('delay').value='600';$('delay').dispatchEvent(new Event('input',{bubbles:true}));
+      let closeCalls=0;window.close=()=>closeCalls++;Services.prompt.confirmEx=()=>1;
+      const event=new Event('close',{cancelable:true});window.dispatchEvent(event);return {prevented:event.defaultPrevented,closeCalls};
+    });
+    assert.deepEqual(discardOnClose,{prevented:true,closeCalls:1});
     await page.evaluate(()=>{document.getElementById('lexinote-delay').value='300';document.getElementById('lexinote-save').click();});
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('设置已保存'));
     assert.equal(await page.evaluate(()=>Zotero.LexiNote.config.delay),300);
