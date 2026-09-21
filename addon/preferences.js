@@ -42,8 +42,9 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       return config;
     };
     const restoreFeatureDefaults = () => {
+      if (!window.confirm("确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。")) return;
       const defaults = typeof LexiNoteCore !== "undefined" ? LexiNoteCore.defaults : {
-        enabled: true, autoHighlight: false, highlightColor: "#c0c0c0", highlightType: "highlight", delay: 350, timeout: 12000
+        enabled: true, autoHighlight: true, highlightColor: "#c0c0c0", highlightType: "highlight", delay: 350, timeout: 12000
       };
       $("enabled").checked = defaults.enabled;
       $("autoHighlight").checked = defaults.autoHighlight;
