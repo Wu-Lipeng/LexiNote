@@ -94,11 +94,9 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $(id).addEventListener("input", () => { dirty = true; });
       $(id).addEventListener("change", () => { dirty = true; });
     }
-    window.addEventListener("beforeunload", event => {
+    window.addEventListener("close", event => {
       if (!dirty) return;
-      event.preventDefault();
-      event.returnValue = "设置尚未保存，确定关闭吗？";
-      return event.returnValue;
+      if (!window.confirm("设置尚未保存，确定关闭设置窗口吗？")) event.preventDefault();
     });
     $("test").addEventListener("click", async () => {
       const word = $("test-word").value.trim();
