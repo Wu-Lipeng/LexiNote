@@ -7,7 +7,7 @@ var LexiNoteCore = (() => {
     body: '{"word":"{{word}}","target":"{{target}}"}',
     meaningPath: "translation", phoneticPath: "", examplePath: "",
     target: "zh-CN", delay: 350, timeout: 12000,
-    autoHighlight: false, highlightColor: "#ffd400", highlightType: "highlight"
+    autoHighlight: false, highlightColor: "#c0c0c0", highlightType: "highlight"
   });
   function wordFrom(text) {
     const value = String(text || "").normalize("NFC").trim()

@@ -5,6 +5,7 @@ const vm = require('node:vm');
 const C = require('../addon/core.js');
 const base = { ...C.defaults, endpoint: 'https://example.org/lookup?q={{word}}' };
 test('Unicode single words; reject sentences and oversized selection', () => {
+  assert.equal(C.defaults.highlightColor, '#c0c0c0');
   for (const word of ['apple', 'café', 'naïve', "don't", 'well-being', '中文']) assert.equal(C.wordFrom(word), word);
   assert.equal(C.wordFrom('“apple,”'), 'apple');
   assert.equal(C.wordFrom('two words'), '');
