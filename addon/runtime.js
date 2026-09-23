@@ -376,6 +376,7 @@ var LexiNoteRuntime = class {
       saveButton.disabled = true; status.textContent = "正在保存…";
       try {
         const saved = await this.saveWord({ attachmentID, word: entry.word, result: entry.result, pageLabel, pageIndex });
+        if (!saved.duplicate) await this.openNotebookAtEnd(saved.noteID);
         if (!disposed) {
           status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
           const marking = this.autoMark(reader, highlightDraft);
@@ -490,6 +491,19 @@ var LexiNoteRuntime = class {
     const pending = this.noteQueue.then(() => this.writeWord(entry));
     this.noteQueue = pending.catch(() => {});
     return pending;
+  }
+  async openNotebookAtEnd(noteID) {
+    if (!this.config.openNoteAfterSave || !Zotero.Notes?.open) return false;
+    try {
+      const editor = await Zotero.Notes.open(noteID);
+      const scrollContainer = editor?._iframeWindow?.document?.querySelector(".editor-core");
+      if (!scrollContainer) return false;
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      return true;
+    } catch (error) {
+      Zotero.logError?.(error);
+      return false;
+    }
   }
   async writeWord({ attachmentID, word, result, pageLabel, pageIndex }) {
     if (!this.alive) throw new Error("插件已停用。");

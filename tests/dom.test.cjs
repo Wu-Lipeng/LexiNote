@@ -23,7 +23,8 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
         async saveTx(){await new Promise(r=>setTimeout(r,1));if(!this.id)this.id=nextID++;store.set(this.id,this);return this.id;}
       }
       let pref='{}';
-      window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},Reader:{unregisterEventListener(){}}};
+      const openedNotes=[];const scrollBox={scrollHeight:321,scrollTop:0};
+      window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},Notes:{open:async id=>{openedNotes.push(id);return {_iframeWindow:{document:{querySelector:s=>s==='.editor-core'?scrollBox:null}}};}},Reader:{unregisterEventListener(){}}};
       window.Services={prompt:{BUTTON_POS_0:1,BUTTON_POS_1:256,BUTTON_TITLE_IS_STRING:127,confirmEx:()=>1}};
       const app=new LexiNoteRuntime({id:'test',rootURI:''});window.Zotero.LexiNote=app;
       app.getKey=()=>'';app.setKey=async()=>{};
@@ -47,6 +48,9 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       p.readOnly=true;let rejected=false;try{await app.saveWord(entry('no'));}catch(e){rejected=e.message.includes('只读');}check(rejected,'Read-only library rejected');p.readOnly=false;
       const orphan=new Item('attachment');await orphan.saveTx();rejected=false;try{await app.saveWord(entry('no',orphan.id));}catch(e){rejected=e.message.includes('父条目');}check(rejected,'Standalone attachment explained');
       app.config={...LexiNoteCore.defaults,endpoint:'https://example.org/?q={{word}}',delay:150};
+      const openedBeforeDisable=openedNotes.length;app.config.openNoteAfterSave=false;
+      check(await app.openNotebookAtEnd(999)===false&&openedNotes.length===openedBeforeDisable,'Disabled notebook opening does not open a note');
+      app.config.openNoteAfterSave=true;
       app.lookup=async word=>({meaning:'释义 '+word,phonetic:'/test/',example:'Example.'});
       const reader={itemID:a.id};let popup;
       const event=word=>({reader,doc:document,params:{annotation:{text:word,pageLabel:'4',position:{pageIndex:3}}},append:node=>{popup=node;document.body.append(node);}});
@@ -61,12 +65,13 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       check(popup.textContent.includes('释义 delta')&&popup.textContent.includes('释义 gamma')&&queryInput.value==='gamma','Manual query appends a result and updates the input');
       [...popup.querySelectorAll('button')].find(b=>b.textContent==='保存 delta').click();await app.noteQueue;await new Promise(r=>setTimeout(r,10));
       check(note.getNote().includes('delta')&&popup.textContent.includes('已追加'),'Popup save writes to originating note');
+      check(openedNotes.at(-1)===note.id&&scrollBox.scrollTop===scrollBox.scrollHeight,'New word opens its notebook at the bottom');
       const old=popup;app.selection(event('epsilon'));popup=document.querySelector('.lexinote-popup');check(!old.isConnected,'New selection removes old popup');
       await new Promise(r=>setTimeout(r,180));popup.remove();await new Promise(r=>setTimeout(r,10));check(app.popups.size===0,'Disconnected popup cleans up');
       note.deleted=true;const replacement=await app.saveWord(entry('zeta'));check(replacement.noteID!==note.id,'Trashed note is not reused');
       return results;
     });
-    assert.equal(results.length,16);
+    assert.equal(results.length,18);
     const markup=fs.readFileSync(path.resolve(__dirname,'../addon/preferences.xhtml'),'utf8');
     await page.evaluate(markup=>{
       const parsed=new DOMParser().parseFromString(markup,'application/xml');
@@ -78,16 +83,16 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     const restored=await page.evaluate(()=>{
       const $=id=>document.getElementById('lexinote-'+id);
       let confirmation='';window.confirm=message=>{confirmation=message;return true;};
-      $('enabled').checked=false;$('autoHighlight').checked=true;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
+      $('enabled').checked=false;$('autoHighlight').checked=true;$('openNoteAfterSave').checked=false;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
       $('restoreFeatures').click();
       return {
         featureHeading:$('feature-settings').querySelector('h2').textContent,
         interfaceHeading:$('interface-settings').querySelector('h2').textContent,
-        enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
+        enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,openNoteAfterSave:$('openNoteAfterSave').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
         status:$('status').textContent,confirmation
       };
     });
-    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。'});
+    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,openNoteAfterSave:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。'});
     const saveOnClose=await page.evaluate(async()=>{
       let closeCalls=0;window.close=()=>closeCalls++;
       let promptArgs;Services.prompt.confirmEx=(...args)=>{promptArgs=args;return 0;};
@@ -108,6 +113,6 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     assert.equal(await page.evaluate(()=>{const event=new Event('close',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),false);
     await page.evaluate(()=>document.getElementById('lexinote-test').click());
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('测试成功'));
-    console.log('16 DOM/data assertions plus settings save and test passed (simulated Zotero).');
+    console.log('18 DOM/data assertions plus settings save and test passed (simulated Zotero).');
   } finally {await browser.close();}
 });

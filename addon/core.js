@@ -7,7 +7,7 @@ var LexiNoteCore = (() => {
     body: '{"word":"{{word}}","target":"{{target}}"}',
     meaningPath: "translation", phoneticPath: "", examplePath: "",
     target: "zh-CN", delay: 350, timeout: 12000,
-    autoHighlight: true, highlightColor: "#c0c0c0", highlightType: "highlight"
+    autoHighlight: true, openNoteAfterSave: true, highlightColor: "#c0c0c0", highlightType: "highlight"
   });
   function wordFrom(text) {
     const value = String(text || "").normalize("NFC").trim()
@@ -65,6 +65,10 @@ var LexiNoteCore = (() => {
     const c = { ...defaults, ...input };
     c.endpoint = c.endpoint.trim();
     if (!["generic", "baidu", "baidu-general"].includes(c.provider)) throw new Error("词典接口类型不正确。");
+    if (typeof c.autoHighlight !== "boolean") throw new Error("自动标记设置不正确。");
+    if (typeof c.openNoteAfterSave !== "boolean") throw new Error("保存后打开生词本设置不正确。");
+    if (!/^#[0-9a-f]{6}$/i.test(c.highlightColor)) throw new Error("标记颜色格式不正确。");
+    if (!["highlight", "underline"].includes(c.highlightType)) throw new Error("标记样式不正确。");
     if (["baidu", "baidu-general"].includes(c.provider)) {
       if (typeof c.useBaiduTrial !== "boolean") throw new Error("试用接口设置不正确。");
       if (c.useBaiduTrial && c.provider !== "baidu-general") throw new Error("试用接口仅支持百度文本翻译·通用版。");
@@ -86,9 +90,6 @@ var LexiNoteCore = (() => {
     if (!Number.isInteger(c.delay) || c.delay < 150 || c.delay > 3000) throw new Error("划词延迟应为 150–3000 毫秒。");
     if (!Number.isInteger(c.timeout) || c.timeout < 1000 || c.timeout > 60000) throw new Error("超时应为 1000–60000 毫秒。");
     if (!c.target.trim()) throw new Error("请填写目标语言。");
-    if (typeof c.autoHighlight !== "boolean") throw new Error("自动标记设置不正确。");
-    if (!/^#[0-9a-f]{6}$/i.test(c.highlightColor)) throw new Error("标记颜色格式不正确。");
-    if (!["highlight", "underline"].includes(c.highlightType)) throw new Error("标记样式不正确。");
     const vars = { word: "test", target: c.target, apiKey: "test-key" };
     mapStrings(h, vars);
     if (c.method === "POST") mapStrings(json(c.body, "请求体"), vars);

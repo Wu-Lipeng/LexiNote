@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "name": "LexiNote 划词生词本",
-  "version": "0.2.10",
+  "version": "0.2.11-beta.1",
   "description": "阅读时划词查释义，将生词追加到当前文献的同一条笔记。",
   "icons": {
     "48": "icon-48.png",
