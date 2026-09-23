@@ -493,10 +493,20 @@ var LexiNoteRuntime = class {
     return pending;
   }
   async openNotebookAtEnd(noteID) {
-    if (!this.config.openNoteAfterSave || !Zotero.Notes?.open) return false;
+    if (!this.config.openNoteAfterSave) return false;
     try {
-      const editor = await Zotero.Notes.open(noteID);
-      const scrollContainer = editor?._iframeWindow?.document?.querySelector(".editor-core");
+      const note = await Zotero.Items.getAsync(noteID);
+      const contextPane = Zotero.getMainWindow?.()?.ZoteroContextPane;
+      const context = contextPane?.context;
+      if (!note || !context) return false;
+      contextPane.collapsed = false;
+      context.mode = "notes";
+      const notesContext = context._getNotesContext(note.libraryID);
+      notesContext._setPinnedNote(note);
+      const editor = notesContext._getCurrentEditor();
+      if (!editor) return false;
+      await editor.focus();
+      const scrollContainer = editor.getCurrentInstance?.()?._iframeWindow?.document?.querySelector(".editor-core");
       if (!scrollContainer) return false;
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
       return true;

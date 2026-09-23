@@ -24,7 +24,10 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       }
       let pref='{}';
       const openedNotes=[];const scrollBox={scrollHeight:321,scrollTop:0};
-      window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},Notes:{open:async id=>{openedNotes.push(id);return {_iframeWindow:{document:{querySelector:s=>s==='.editor-core'?scrollBox:null}}};}},Reader:{unregisterEventListener(){}}};
+      const sideEditor={focus:async()=>{},getCurrentInstance:()=>({_iframeWindow:{document:{querySelector:s=>s==='.editor-core'?scrollBox:null}}})};
+      const notesContext={_setPinnedNote:note=>openedNotes.push(note.id),_getCurrentEditor:()=>sideEditor};
+      const context={mode:'item',_getNotesContext:()=>notesContext};const contextPane={collapsed:true,context};
+      window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},getMainWindow:()=>({ZoteroContextPane:contextPane}),Reader:{unregisterEventListener(){}}};
       window.Services={prompt:{BUTTON_POS_0:1,BUTTON_POS_1:256,BUTTON_TITLE_IS_STRING:127,confirmEx:()=>1}};
       const app=new LexiNoteRuntime({id:'test',rootURI:''});window.Zotero.LexiNote=app;
       app.getKey=()=>'';app.setKey=async()=>{};
@@ -65,7 +68,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       check(popup.textContent.includes('释义 delta')&&popup.textContent.includes('释义 gamma')&&queryInput.value==='gamma','Manual query appends a result and updates the input');
       [...popup.querySelectorAll('button')].find(b=>b.textContent==='保存 delta').click();await app.noteQueue;await new Promise(r=>setTimeout(r,10));
       check(note.getNote().includes('delta')&&popup.textContent.includes('已追加'),'Popup save writes to originating note');
-      check(openedNotes.at(-1)===note.id&&scrollBox.scrollTop===scrollBox.scrollHeight,'New word opens its notebook at the bottom');
+      check(openedNotes.at(-1)===note.id&&contextPane.collapsed===false&&context.mode==='notes'&&scrollBox.scrollTop===scrollBox.scrollHeight,'New word opens its notebook at the side-panel bottom');
       const old=popup;app.selection(event('epsilon'));popup=document.querySelector('.lexinote-popup');check(!old.isConnected,'New selection removes old popup');
       await new Promise(r=>setTimeout(r,180));popup.remove();await new Promise(r=>setTimeout(r,10));check(app.popups.size===0,'Disconnected popup cleans up');
       note.deleted=true;const replacement=await app.saveWord(entry('zeta'));check(replacement.noteID!==note.id,'Trashed note is not reused');
