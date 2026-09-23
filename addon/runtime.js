@@ -311,6 +311,7 @@ var LexiNoteRuntime = class {
     const word = LexiNoteCore.wordFrom(params?.annotation?.text);
     if (!word) return;
     const attachmentID = reader.itemID;
+    this.revealSavedWord(attachmentID, word).catch(() => {});
     // Capture the originating attachment/page before any network operation.
     const pageLabel = String(params.annotation.pageLabel || "");
     const pageIndex = params.annotation.position?.pageIndex;
@@ -492,7 +493,31 @@ var LexiNoteRuntime = class {
     this.noteQueue = pending.catch(() => {});
     return pending;
   }
-  async openNotebookAtEnd(noteID) {
+  async findSavedWord(attachmentID, word) {
+    const attachment = await Zotero.Items.getAsync(attachmentID);
+    if (!attachment?.parentID) return null;
+    const parent = await Zotero.Items.getAsync(attachment.parentID);
+    if (!parent || parent.deleted) return null;
+    const normalizedWord = LexiNoteCore.normalize(word);
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    const parser = new DOMParser();
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag(this.tag)) continue;
+      const document = parser.parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      const heading = [...root.querySelectorAll("h3")].find(h =>
+        h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
+      );
+      if (heading) return { noteID: note.id, normalizedWord };
+    }
+    return null;
+  }
+  async revealSavedWord(attachmentID, word) {
+    if (!this.config.autoLocateSavedWord) return false;
+    const saved = await this.findSavedWord(attachmentID, word);
+    return saved ? this.openNotebookAtEnd(saved.noteID, saved.normalizedWord) : false;
+  }
+  async openNotebookAtEnd(noteID, normalizedWord = "") {
     if (!this.config.openNoteAfterSave) return false;
     try {
       const note = await Zotero.Items.getAsync(noteID);
@@ -506,8 +531,15 @@ var LexiNoteRuntime = class {
       const editor = notesContext._getCurrentEditor();
       if (!editor) return false;
       await editor.focus();
-      const scrollContainer = editor.getCurrentInstance?.()?._iframeWindow?.document?.querySelector(".editor-core");
+      const document = editor.getCurrentInstance?.()?._iframeWindow?.document;
+      const scrollContainer = document?.querySelector(".editor-core");
       if (!scrollContainer) return false;
+      if (normalizedWord) {
+        const heading = [...document.querySelectorAll("h3")].find(h =>
+          h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
+        );
+        if (heading) { heading.scrollIntoView({ block: "center" }); return true; }
+      }
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
       return true;
     } catch (error) {

@@ -7,6 +7,7 @@ const base = { ...C.defaults, endpoint: 'https://example.org/lookup?q={{word}}' 
 test('Unicode single words; reject sentences and oversized selection', () => {
   assert.equal(C.defaults.autoHighlight, true);
   assert.equal(C.defaults.openNoteAfterSave, true);
+  assert.equal(C.defaults.autoLocateSavedWord, true);
   assert.equal(C.defaults.highlightColor, '#c0c0c0');
   for (const word of ['apple', 'café', 'naïve', "don't", 'well-being', '中文']) assert.equal(C.wordFrom(word), word);
   assert.equal(C.wordFrom('“apple,”'), 'apple');
@@ -55,6 +56,7 @@ test('Baidu general mode accepts own credentials or local trial mode', () => {
   assert.doesNotThrow(() => C.validate({ ...C.defaults, provider: 'baidu-general', useBaiduTrial: true }));
   assert.throws(() => C.validate({ ...C.defaults, provider: 'baidu-general' }), /百度 API Key/);
   assert.throws(() => C.validate({ ...C.defaults, openNoteAfterSave: 'yes' }), /保存后打开生词本/);
+  assert.throws(() => C.validate({ ...C.defaults, autoLocateSavedWord: 'yes' }), /已保存单词定位/);
 });
 function runtime(initialConfig = base, credentials = {}) {
   let sent = 0;

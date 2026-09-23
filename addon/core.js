@@ -7,7 +7,7 @@ var LexiNoteCore = (() => {
     body: '{"word":"{{word}}","target":"{{target}}"}',
     meaningPath: "translation", phoneticPath: "", examplePath: "",
     target: "zh-CN", delay: 350, timeout: 12000,
-    autoHighlight: true, openNoteAfterSave: true, highlightColor: "#c0c0c0", highlightType: "highlight"
+    autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, highlightColor: "#c0c0c0", highlightType: "highlight"
   });
   function wordFrom(text) {
     const value = String(text || "").normalize("NFC").trim()
@@ -67,6 +67,7 @@ var LexiNoteCore = (() => {
     if (!["generic", "baidu", "baidu-general"].includes(c.provider)) throw new Error("词典接口类型不正确。");
     if (typeof c.autoHighlight !== "boolean") throw new Error("自动标记设置不正确。");
     if (typeof c.openNoteAfterSave !== "boolean") throw new Error("保存后打开生词本设置不正确。");
+    if (typeof c.autoLocateSavedWord !== "boolean") throw new Error("已保存单词定位设置不正确。");
     if (!/^#[0-9a-f]{6}$/i.test(c.highlightColor)) throw new Error("标记颜色格式不正确。");
     if (!["highlight", "underline"].includes(c.highlightType)) throw new Error("标记样式不正确。");
     if (["baidu", "baidu-general"].includes(c.provider)) {

@@ -23,8 +23,10 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
         async saveTx(){await new Promise(r=>setTimeout(r,1));if(!this.id)this.id=nextID++;store.set(this.id,this);return this.id;}
       }
       let pref='{}';
-      const openedNotes=[];const scrollBox={scrollHeight:321,scrollTop:0};
-      const sideEditor={focus:async()=>{},getCurrentInstance:()=>({_iframeWindow:{document:{querySelector:s=>s==='.editor-core'?scrollBox:null}}})};
+      const openedNotes=[];const scrollBox={scrollHeight:321,scrollTop:0};let locatedHeading=false;
+      const savedHeading={dataset:{lexinoteWord:'alpha'},textContent:'alpha',scrollIntoView:options=>{locatedHeading=options.block==='center';}};
+      const sideDocument={querySelector:s=>s==='.editor-core'?scrollBox:null,querySelectorAll:s=>s==='h3'?[savedHeading]:[]};
+      const sideEditor={focus:async()=>{},getCurrentInstance:()=>({_iframeWindow:{document:sideDocument}})};
       const notesContext={_setPinnedNote:note=>openedNotes.push(note.id),_getCurrentEditor:()=>sideEditor};
       const context={mode:'item',_getNotesContext:()=>notesContext};const contextPane={collapsed:true,context};
       window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},getMainWindow:()=>({ZoteroContextPane:contextPane}),Reader:{unregisterEventListener(){}}};
@@ -54,6 +56,10 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const openedBeforeDisable=openedNotes.length;app.config.openNoteAfterSave=false;
       check(await app.openNotebookAtEnd(999)===false&&openedNotes.length===openedBeforeDisable,'Disabled notebook opening does not open a note');
       app.config.openNoteAfterSave=true;
+      check(await app.revealSavedWord(a.id,'alpha')===true&&openedNotes.at(-1)===note.id&&locatedHeading,'Existing word opens its notebook at the matching heading');
+      const openedBeforeLocateDisable=openedNotes.length;app.config.autoLocateSavedWord=false;
+      check(await app.revealSavedWord(a.id,'alpha')===false&&openedNotes.length===openedBeforeLocateDisable,'Disabled saved-word location does not open a note');
+      app.config.autoLocateSavedWord=true;
       app.lookup=async word=>({meaning:'释义 '+word,phonetic:'/test/',example:'Example.'});
       const reader={itemID:a.id};let popup;
       const event=word=>({reader,doc:document,params:{annotation:{text:word,pageLabel:'4',position:{pageIndex:3}}},append:node=>{popup=node;document.body.append(node);}});
@@ -74,7 +80,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       note.deleted=true;const replacement=await app.saveWord(entry('zeta'));check(replacement.noteID!==note.id,'Trashed note is not reused');
       return results;
     });
-    assert.equal(results.length,18);
+    assert.equal(results.length,20);
     const markup=fs.readFileSync(path.resolve(__dirname,'../addon/preferences.xhtml'),'utf8');
     await page.evaluate(markup=>{
       const parsed=new DOMParser().parseFromString(markup,'application/xml');
@@ -86,16 +92,16 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     const restored=await page.evaluate(()=>{
       const $=id=>document.getElementById('lexinote-'+id);
       let confirmation='';window.confirm=message=>{confirmation=message;return true;};
-      $('enabled').checked=false;$('autoHighlight').checked=true;$('openNoteAfterSave').checked=false;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
+      $('enabled').checked=false;$('autoHighlight').checked=true;$('openNoteAfterSave').checked=false;$('autoLocateSavedWord').checked=false;$('highlightColor').value='#123456';$('highlightType').value='underline';$('delay').value='900';$('timeout').value='2000';
       $('restoreFeatures').click();
       return {
         featureHeading:$('feature-settings').querySelector('h2').textContent,
         interfaceHeading:$('interface-settings').querySelector('h2').textContent,
-        enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,openNoteAfterSave:$('openNoteAfterSave').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
+        enabled:$('enabled').checked,autoHighlight:$('autoHighlight').checked,openNoteAfterSave:$('openNoteAfterSave').checked,autoLocateSavedWord:$('autoLocateSavedWord').checked,color:$('highlightColor').value,type:$('highlightType').value,delay:$('delay').value,timeout:$('timeout').value,
         status:$('status').textContent,confirmation
       };
     });
-    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,openNoteAfterSave:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。'});
+    assert.deepEqual(restored,{featureHeading:'功能设置',interfaceHeading:'接口设置',enabled:true,autoHighlight:true,openNoteAfterSave:true,autoLocateSavedWord:true,color:'#c0c0c0',type:'highlight',delay:'350',timeout:'12000',status:'已恢复功能默认设置。请点击“保存设置”以应用。',confirmation:'确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。'});
     const saveOnClose=await page.evaluate(async()=>{
       let closeCalls=0;window.close=()=>closeCalls++;
       let promptArgs;Services.prompt.confirmEx=(...args)=>{promptArgs=args;return 0;};
@@ -116,6 +122,6 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     assert.equal(await page.evaluate(()=>{const event=new Event('close',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),false);
     await page.evaluate(()=>document.getElementById('lexinote-test').click());
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('测试成功'));
-    console.log('18 DOM/data assertions plus settings save and test passed (simulated Zotero).');
+    console.log('20 DOM/data assertions plus settings save and test passed (simulated Zotero).');
   } finally {await browser.close();}
 });
