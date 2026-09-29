@@ -12,6 +12,7 @@ var LexiNoteRuntime = class {
     this.popups = new Set();
     this.byReader = new WeakMap();
     this.noteQueue = Promise.resolve();
+    this.noteLocatorDocuments = new Map();
     this.alive = true;
     this.handler = event => this.selection(event);
     this.config = this.readConfig();
@@ -32,6 +33,8 @@ var LexiNoteRuntime = class {
       scripts: [this.rootURI + "preferences.js"]
     });
     Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.handler, this.id);
+    this.noteLocatorTimer = setInterval(() => this.attachOpenNoteLocators(), 1000);
+    this.attachOpenNoteLocators();
   }
   getKey() {
     return this.getCredential("Generic API Key") || this.getCredential("API key");
@@ -149,11 +152,32 @@ var LexiNoteRuntime = class {
       // object through Xray wrappers loses dictionary properties such as color.
       const frame = this.readerFrame(reader);
       const annotation = frame?.JSON?.parse ? frame.JSON.parse(JSON.stringify(data)) : data;
-      manager.addAnnotation(annotation);
-      return { marked: true };
+      const created = manager.addAnnotation(annotation);
+      return { marked: Boolean(created || annotation.id), annotationID: created?.id || annotation.id || "" };
     } catch (error) {
       return { marked: false, reason: error?.message || "Zotero 拒绝创建标注。" };
     }
+  }
+  existingMark(reader, draft) {
+    if (!draft?.position?.rects?.length) return null;
+    try {
+      const annotations = this.readerInternal(reader)?._annotationManager?._annotations || [];
+      const covers = (outer, inner) => outer[0] <= inner[0] + 0.5 && outer[1] <= inner[1] + 0.5
+        && outer[2] >= inner[2] - 0.5 && outer[3] >= inner[3] - 0.5;
+      return annotations.find(annotation => {
+        if (!annotation?.id || annotation.type !== this.config.highlightType) return false;
+        const position = annotation.position;
+        if (position?.pageIndex !== draft.position.pageIndex || !position.rects?.length) return false;
+        // A manual mark may cover a phrase. It is still the intended mark when
+        // every rectangle of this word selection is inside that annotation.
+        return draft.position.rects.every(selected => position.rects.some(marked => covers(marked, selected)));
+      }) || null;
+    } catch (_) { return null; }
+  }
+  markForNewEntry(reader, draft) {
+    const existing = this.existingMark(reader, draft);
+    if (existing) return { marked: true, existing: true, annotationID: existing.id };
+    return { ...this.autoMark(reader, draft), existing: false };
   }
   trialCredentials() {
     const source = typeof LexiNoteTrialCredentials === "object" ? LexiNoteTrialCredentials : {};
@@ -376,13 +400,35 @@ var LexiNoteRuntime = class {
       if (saveButton.disabled) return;
       saveButton.disabled = true; status.textContent = "正在保存…";
       try {
-        const saved = await this.saveWord({ attachmentID, word: entry.word, result: entry.result, pageLabel, pageIndex });
-        if (!saved.duplicate) await this.openNotebookAtEnd(saved.noteID);
+        const saved = await this.saveWord({ attachmentID, word: entry.word, originalWord: word, result: entry.result, pageLabel, pageIndex });
+        let marking = null;
+        // Persist the highlighter identifier before opening the note. Opening
+        // first can leave the note iframe on an older revision without the
+        // annotation URL parameter used for exact navigation.
+        if (!saved.duplicate) {
+          marking = this.markForNewEntry(reader, highlightDraft);
+          if (marking.annotationID) await this.saveAnnotationID(saved.noteID, entry.word, word, marking.annotationID, attachmentID);
+          await this.openNotebookAtEnd(saved.noteID);
+        } else {
+          // Re-saving an existing word is allowed to repair a missing
+          // association, but must never create a second PDF annotation.
+          const existing = this.existingMark(reader, highlightDraft);
+          if (existing?.id && !await this.savedAnnotationID(saved.noteID, entry.word, word)) {
+            await this.saveAnnotationID(saved.noteID, entry.word, word, existing.id, attachmentID);
+            marking = { marked: true, existing: true, annotationID: existing.id };
+          }
+        }
         if (!disposed) {
-          status.textContent = saved.duplicate ? "该词已在这篇文献的生词本中。" : "已追加到这篇文献的生词本。";
-          const marking = this.autoMark(reader, highlightDraft);
-          if (marking.marked) status.textContent += " 已自动标记选中文本。";
-          else if (this.config.autoHighlight && marking.reason !== "disabled") status.textContent += " 自动标记未完成：" + marking.reason;
+          status.textContent = saved.duplicate
+            ? (saved.formatUpdated ? "该词已在这篇文献的生词本中，已更新为当前格式。" : "该词已在这篇文献的生词本中。")
+            : "已追加到这篇文献的生词本。";
+          if (!saved.duplicate) {
+            if (marking.marked) status.textContent += marking.existing ? " 已关联已有标记。" : " 已自动标记选中文本。";
+            else if (this.config.autoHighlight && marking.reason !== "disabled") status.textContent += " 自动标记未完成：" + marking.reason;
+            if (marking.annotationID) status.textContent += " 高亮关联已保存。";
+          } else if (marking?.existing) {
+            status.textContent += " 已关联已有标记并补全高亮 ID。";
+          }
           saveButton.textContent = "已保存";
         }
       } catch (error) {
@@ -493,6 +539,61 @@ var LexiNoteRuntime = class {
     this.noteQueue = pending.catch(() => {});
     return pending;
   }
+  matchesSavedWord(heading, normalizedWord) {
+    return heading.dataset.lexinoteWord === normalizedWord
+      || heading.dataset.lexinoteOriginalWord === normalizedWord
+      || LexiNoteCore.normalize(heading.textContent.trim()) === normalizedWord;
+  }
+  entrySourceLine(heading) {
+    for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
+      if (element.querySelector?.('a[href^="zotero://open-pdf/"]')) return element;
+    }
+    return null;
+  }
+  sourceLinkText(link) {
+    try {
+      const page = new URL(link.href).searchParams.get("page");
+      return page && /^\d+$/.test(page) ? "第 " + page + " 页" : "查看位置";
+    } catch (_) { return "查看位置"; }
+  }
+  createSourceLink(document, attachment, pageLabel, pageIndex) {
+    const link = document.createElement("a");
+    const library = Zotero.Libraries.get(attachment.libraryID);
+    const libraryPath = library.libraryType === "group" ? "groups/" + library.groupID : "library";
+    link.href = "zotero://open-pdf/" + libraryPath + "/items/" + attachment.key
+      + (Number.isInteger(pageIndex) ? "?page=" + (pageIndex + 1) : "");
+    link.textContent = pageLabel ? "第 " + pageLabel + " 页" : "查看位置";
+    return link;
+  }
+  updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex) {
+    let changed = false;
+    let sourceLine = this.entrySourceLine(heading);
+    const storedOriginalWord = sourceLine?.textContent.match(/^原文词：(.+?) · /)?.[1] || originalWord;
+    const normalizedOriginalWord = LexiNoteCore.normalize(storedOriginalWord);
+    if (heading.dataset.lexinoteWord !== LexiNoteCore.normalize(heading.textContent.trim())) {
+      heading.dataset.lexinoteWord = LexiNoteCore.normalize(heading.textContent.trim()); changed = true;
+    }
+    if (heading.dataset.lexinoteOriginalWord !== normalizedOriginalWord) {
+      heading.dataset.lexinoteOriginalWord = normalizedOriginalWord; changed = true;
+    }
+    let link = sourceLine?.querySelector?.('a[href^="zotero://open-pdf/"]');
+    if (!sourceLine) {
+      sourceLine = document.createElement("p");
+      let nextHeading = heading.nextElementSibling;
+      while (nextHeading && nextHeading.tagName !== "H3") nextHeading = nextHeading.nextElementSibling;
+      root.insertBefore(sourceLine, nextHeading);
+      link = this.createSourceLink(document, attachment, pageLabel, pageIndex);
+      sourceLine.append(document.createTextNode("原文词：" + storedOriginalWord + " · "), link);
+      return true;
+    }
+    const suffix = [];
+    for (let node = link.nextSibling; node; node = node.nextSibling) suffix.push(node);
+    const expectedPrefix = "原文词：" + storedOriginalWord + " · ";
+    if (sourceLine.textContent.startsWith(expectedPrefix) && link.textContent === this.sourceLinkText(link)) return changed;
+    link.textContent = this.sourceLinkText(link);
+    sourceLine.replaceChildren(document.createTextNode(expectedPrefix), link, ...suffix);
+    return true;
+  }
   async findSavedWord(attachmentID, word) {
     const attachment = await Zotero.Items.getAsync(attachmentID);
     if (!attachment?.parentID) return null;
@@ -505,9 +606,7 @@ var LexiNoteRuntime = class {
       if (note.deleted || !note.hasTag(this.tag)) continue;
       const document = parser.parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
-      const heading = [...root.querySelectorAll("h3")].find(h =>
-        h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
-      );
+      const heading = [...root.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalizedWord));
       if (heading) return { noteID: note.id, normalizedWord };
     }
     return null;
@@ -534,10 +633,9 @@ var LexiNoteRuntime = class {
       const document = editor.getCurrentInstance?.()?._iframeWindow?.document;
       const scrollContainer = document?.querySelector(".editor-core");
       if (!scrollContainer) return false;
+      this.attachNoteLocator(document, note);
       if (normalizedWord) {
-        const heading = [...document.querySelectorAll("h3")].find(h =>
-          h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
-        );
+        const heading = [...document.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalizedWord));
         if (heading) { heading.scrollIntoView({ block: "center" }); return true; }
       }
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
@@ -547,7 +645,127 @@ var LexiNoteRuntime = class {
       return false;
     }
   }
-  async writeWord({ attachmentID, word, result, pageLabel, pageIndex }) {
+  async saveAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
+    const note = await Zotero.Items.getAsync(noteID);
+    if (!note?.isEditable?.()) return;
+    const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+    const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
+    const heading = [...document.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
+    if (!heading) return;
+    heading.dataset.lexinoteAnnotationId = annotationID;
+    heading.dataset.lexinoteAttachmentId = String(attachmentID);
+    const source = this.entrySourceLine(heading)?.querySelector?.('a[href^="zotero://open-pdf/"]');
+    if (source) {
+      const url = new URL(source.href); url.searchParams.set("annotation", annotationID); source.href = url.href;
+      const line = source.parentElement;
+      // The ID is persisted in the native source-link URL. Do not render it in
+      // the note: editor reconciliation can make diagnostic text flash and it
+      // is not needed for normal use.
+      for (const node of [...(line?.childNodes || [])]) {
+        if (node.nodeType === 1 && node.matches?.("span[data-lexinote-highlight-id]")) node.remove();
+        else if (node.nodeType === 3) node.nodeValue = node.nodeValue.replace(/ · 高亮 ID：[^ ·]+/g, "");
+      }
+    }
+    note.setNote(document.body.innerHTML); await note.saveTx();
+  }
+  async savedAnnotationID(noteID, word, originalWord) {
+    const note = await Zotero.Items.getAsync(noteID);
+    if (!note) return "";
+    const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+    const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
+    const heading = [...document.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
+    const source = heading && this.entrySourceLine(heading)?.querySelector?.('a[href^="zotero://open-pdf/"]');
+    try { return new URL(source?.href || "").searchParams.get("annotation") || ""; }
+    catch (_) { return heading?.dataset.lexinoteAnnotationId || ""; }
+  }
+  attachNoteLocator(document, note) {
+    // The Zotero iframe can be returned through a fresh Xray wrapper during
+    // the periodic discovery scan. A Map keyed by that wrapper is not stable,
+    // so use a marker on the underlying document as the duplicate guard.
+    const root = document.documentElement;
+    if (root?.getAttribute("data-lexinote-locator-attached") === "true") return;
+    root?.setAttribute("data-lexinote-locator-attached", "true");
+    this.showNoteLocateStatus(document, this.config.noteLocateMode === "off" ? "生词本原文定位：已关闭" : "生词本原文定位：监听已就绪");
+    const locate = event => {
+      if (this.config.noteLocateMode === "off") return;
+      // A completed drag emits mouseup followed by click. In select mode the
+      // latter can still see the old range and made an ordinary click navigate
+      // unexpectedly (and reported the same highlighter ID twice).
+      if (this.config.noteLocateMode === "select" && event.type !== "mouseup") return;
+      if (this.config.noteLocateMode === "click" && event.type !== "click") return;
+      const selection = document.getSelection?.();
+      const rangeNode = selection?.rangeCount ? selection.getRangeAt(0).commonAncestorContainer : null;
+      const selectionElement = rangeNode?.nodeType === 1 ? rangeNode : rangeNode?.parentElement;
+      const selectedHeading = selectionElement?.closest?.("h3");
+      const heading = this.config.noteLocateMode === "select"
+        ? selectedHeading
+        : event.target?.closest?.("h3");
+      if (!heading || (this.config.noteLocateMode === "select" && !selection?.toString().trim())) return;
+      this.showNoteLocateStatus(document, "已读取词条，正在查找原文位置…");
+      const source = this.entrySourceLine(heading)?.querySelector?.('a[href^="zotero://open-pdf/"]');
+      const annotationID = (() => { try { return new URL(source?.href || "").searchParams.get("annotation") || heading.dataset.lexinoteAnnotationId; } catch (_) { return heading.dataset.lexinoteAnnotationId; } })();
+      if (!annotationID) {
+        this.openSourceLocation(source?.href).then(opened => {
+          heading.title = opened ? "未记录高亮 ID，已跳转到原文页码。" : "未能打开原文页码。";
+          this.showNoteLocateStatus(document, heading.title, !opened);
+        });
+        return;
+      }
+      this.showNoteLocateStatus(document, "已读取高亮 ID：" + annotationID + "，正在打开 PDF 并定位…");
+      this.openSourceLocation(source?.href, annotationID).then(opened => this.showNoteLocateStatus(document, opened ? "已发送高亮定位请求。" : "未能定位高亮，已跳转到原文页码。", !opened));
+    };
+    document.addEventListener("click", locate);
+    document.addEventListener("mouseup", locate);
+    this.noteLocatorDocuments.set(document, { locate, root });
+  }
+  async openSourceLocation(href, annotationID = "") {
+    try {
+      const url = new URL(href);
+      const key = url.pathname.match(/\/items\/([^/]+)$/)?.[1];
+      if (!key) return false;
+      let attachment = null;
+      for (const library of Zotero.Libraries.getAll?.() || []) {
+        attachment = Zotero.Items.getByLibraryAndKey?.(library.libraryID, key);
+        if (attachment) break;
+      }
+      if (!attachment) return false;
+      const page = Number(url.searchParams.get("page"));
+      const location = annotationID ? { annotationID } : (Number.isInteger(page) && page > 0 ? { pageIndex: page - 1 } : {});
+      await Zotero.getMainWindow?.()?.ZoteroPane?.viewPDF?.(attachment.id, location);
+      return true;
+    } catch (_) { return false; }
+  }
+  showNoteLocateStatus(document, text, error = false) {
+    try {
+      let status = document.getElementById("lexinote-locate-status");
+      if (!status) {
+        status = document.createElement("div"); status.id = "lexinote-locate-status";
+        status.style.cssText = "position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:340px;padding:6px 9px;border:1px solid #8888;border-radius:5px;background:Canvas;color:CanvasText;font:12px/1.4 system-ui;box-shadow:0 2px 8px #0003;pointer-events:none;";
+        document.body.append(status);
+      }
+      status.textContent = "LexiNote：" + text;
+      status.style.borderColor = error ? "#c44" : "#8888";
+    } catch (_) {}
+  }
+  attachOpenNoteLocators() {
+    if (!this.alive) return;
+    try {
+      const context = Zotero.getMainWindow?.()?.ZoteroContextPane?.context;
+      for (const library of Zotero.Libraries.getAll?.() || []) {
+        const editor = context?._getNotesContext?.(library.libraryID)?._getCurrentEditor?.();
+        const document = editor?.getCurrentInstance?.()?._iframeWindow?.document;
+        if (document) this.attachNoteLocator(document, null);
+      }
+      const main = Zotero.getMainWindow?.()?.document;
+      const visit = document => {
+        if (!document) return;
+        if (document.querySelector?.(".editor-core")) this.attachNoteLocator(document, null);
+        for (const frame of document.querySelectorAll?.("iframe") || []) visit(frame.contentDocument);
+      };
+      visit(main);
+    } catch (_) {}
+  }
+  async writeWord({ attachmentID, word, originalWord, result, pageLabel, pageIndex }) {
     if (!this.alive) throw new Error("插件已停用。");
     const attachment = await Zotero.Items.getAsync(attachmentID);
     if (!attachment || attachment.deleted || !attachment.isAttachment()) throw new Error("原文附件已不存在。");
@@ -557,6 +775,8 @@ var LexiNoteRuntime = class {
     if (!parent.isEditable()) throw new Error("此文献库为只读，无法保存笔记。");
     const parser = new DOMParser();
     const normalizedWord = LexiNoteCore.normalize(word);
+    const savedOriginalWord = LexiNoteCore.wordFrom(originalWord) || word;
+    const normalizedOriginalWord = LexiNoteCore.normalize(savedOriginalWord);
     const notes = await Zotero.Items.getAsync(parent.getNotes());
     const notebooks = notes.filter(n => !n.deleted && n.hasTag(this.tag));
     let note = null;
@@ -565,10 +785,19 @@ var LexiNoteRuntime = class {
     for (const candidate of notebooks) {
       const candidateDocument = parser.parseFromString(candidate.getNote(), "text/html");
       const candidateRoot = candidateDocument.body.querySelector("div[data-schema-version]") || candidateDocument.body;
-      const duplicate = [...candidateRoot.querySelectorAll("h3")].some(h =>
-        h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
+      const duplicate = [...candidateRoot.querySelectorAll("h3")].find(h =>
+        this.matchesSavedWord(h, normalizedWord) || this.matchesSavedWord(h, normalizedOriginalWord)
       );
-      if (duplicate) return { noteID: candidate.id, duplicate: true };
+      if (duplicate) {
+        const formatUpdated = candidate.isEditable() && this.updateSavedWordFormat(candidateDocument, candidateRoot, duplicate,
+          savedOriginalWord, attachment, pageLabel, pageIndex);
+        if (formatUpdated) {
+          candidate.setNote(candidateDocument.body.innerHTML);
+          try { await candidate.saveTx(); }
+          catch (_) { throw new Error("已保存的生词格式更新失败，请检查文献库权限后重试。"); }
+        }
+        return { noteID: candidate.id, duplicate: true, formatUpdated };
+      }
       if (!note && candidate.isEditable()) note = candidate;
     }
     if (!note && notebooks.length) throw new Error("生词本笔记不可编辑。");
@@ -585,17 +814,14 @@ var LexiNoteRuntime = class {
     const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; root.append(el); return el; };
     const wordHeading = add("h3", word);
     wordHeading.dataset.lexinoteWord = normalizedWord;
+    wordHeading.dataset.lexinoteOriginalWord = normalizedOriginalWord;
     if (result.phonetic) add("p", result.phonetic);
     for (const line of result.meaning.split("\n")) if (line) add("p", line);
     if (result.example) add("p", "例句：" + result.example);
     const p = add("p", "");
-    const link = document.createElement("a");
-    const library = Zotero.Libraries.get(attachment.libraryID);
-    const libraryPath = library.libraryType === "group" ? "groups/" + library.groupID : "library";
-    link.href = "zotero://open-pdf/" + libraryPath + "/items/" + attachment.key
-      + (Number.isInteger(pageIndex) ? "?page=" + (pageIndex + 1) : "");
-    link.textContent = pageLabel ? "原文 · 第 " + pageLabel + " 页" : "查看原文";
-    p.append(link, document.createTextNode(" · " + new Date().toLocaleDateString()));
+    const link = this.createSourceLink(document, attachment, pageLabel, pageIndex);
+    p.append(document.createTextNode("原文词：" + savedOriginalWord + " · "), link,
+      document.createTextNode(" · " + new Date().toLocaleDateString()));
     note.setNote(document.body.innerHTML);
     // Use the common data API; this does not depend on collection selection APIs changed in v10.
     try { await note.saveTx(); }
@@ -608,6 +834,12 @@ var LexiNoteRuntime = class {
   stop() {
     this.alive = false;
     Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.handler);
+    clearInterval(this.noteLocatorTimer);
+    for (const [document, handlers] of this.noteLocatorDocuments) {
+      document.removeEventListener("click", handlers.locate); document.removeEventListener("mouseup", handlers.locate);
+      handlers.root?.removeAttribute("data-lexinote-locator-attached");
+    }
+    this.noteLocatorDocuments.clear();
     for (const popup of [...this.popups]) popup.dispose();
     this.clearCache();
   }

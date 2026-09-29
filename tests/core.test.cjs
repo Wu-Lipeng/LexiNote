@@ -117,6 +117,18 @@ test('startup restores saved Baidu credentials into the runtime configuration', 
   const persisted = JSON.parse(prefs['extensions.lexinote.config']);
   assert.equal(persisted.baiduApiKey,''); assert.equal(persisted.baiduSecretKey,'');
 });
+test('saved-word matching accepts the query word, original selection, and legacy headings', () => {
+  const {app}=runtime();
+  assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'go'), true);
+  assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'went'), true);
+  assert.equal(app.matchesSavedWord({dataset:{},textContent:'Present'}, 'present'), true);
+  assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'gone'), false);
+});
+test('saved-word source links use the concise current page label', () => {
+  const {app}=runtime();
+  assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');
+  assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC'}), '查看位置');
+});
 test('candidate lookup keeps successful spellings and reports no usable result', async () => {
   const {app}=runtime();
   app.lookup=async word=>{

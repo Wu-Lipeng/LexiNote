@@ -10,6 +10,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
     $("openNoteAfterSave").checked = Boolean(app.config.openNoteAfterSave);
     $("autoLocateSavedWord").checked = Boolean(app.config.autoLocateSavedWord);
+    $("noteLocateMode").value = app.config.noteLocateMode || "off";
     const baiduDrafts = {};
     let dirty = false;
     let previousProvider = $("provider").value;
@@ -38,7 +39,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     try { $("key").value = app.getKey(); }
     catch (_) { $("status").textContent = "无法读取凭据存储，请解锁后重新打开设置。"; $("save").disabled = true; }
     const read = () => {
-      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked };
+      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value };
       for (const name of names) config[name] = ["delay", "timeout"].includes(name) ? Number($(name).value) : $(name).value;
       config.baiduApiKey = $("baiduApiKey").value.trim(); config.baiduSecretKey = $("baiduSecretKey").value.trim();
       config.useBaiduTrial = $("useBaiduTrial").checked;
@@ -53,6 +54,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("autoHighlight").checked = defaults.autoHighlight;
       $("openNoteAfterSave").checked = defaults.openNoteAfterSave;
       $("autoLocateSavedWord").checked = defaults.autoLocateSavedWord;
+      $("noteLocateMode").value = defaults.noteLocateMode;
       $("highlightColor").value = defaults.highlightColor;
       $("highlightType").value = defaults.highlightType;
       $("delay").value = defaults.delay;
@@ -104,7 +106,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
-    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
+    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
     for (const id of settingControls) {
       $(id).addEventListener("input", () => { dirty = true; });
       $(id).addEventListener("change", () => { dirty = true; });
