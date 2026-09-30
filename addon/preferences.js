@@ -94,6 +94,11 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     const renderSyncDiagnostics = result => {
       const container = $("syncDiagnostics");
       container.replaceChildren();
+      if (result.error) {
+        const message = document.createElement("p"); message.textContent = `诊断在“${result.stage}”失败：${result.error}`;
+        const stack = document.createElement("pre"); stack.textContent = result.stack || "未提供调用栈。"; stack.style.cssText = "white-space:pre-wrap;overflow-wrap:anywhere;font-size:0.8em";
+        container.append(message, stack); return;
+      }
       const summary = document.createElement("p");
       summary.textContent = `已读取 ${result.scanned} 个符合条件的高亮、${result.entries} 个生词词条；匹配 ${result.matched} 个。`;
       const table = document.createElement("table"); table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9em";

@@ -679,38 +679,49 @@ var LexiNoteRuntime = class {
     return { scanned: highlights.length, matched, updated };
   }
   async diagnoseCurrentPDFHighlightMatches() {
-    const reader = this.currentPDFReader();
-    if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
-    const highlights = this.currentFormatHighlights(reader);
-    const attachment = await Zotero.Items.getAsync(reader.itemID);
-    if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
-    const parent = await Zotero.Items.getAsync(attachment.parentID);
-    if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。");
-    const notes = await Zotero.Items.getAsync(parent.getNotes());
-    const parser = new DOMParser();
-    const entries = [];
-    for (const note of notes) {
-      if (note.deleted || !note.hasTag(this.tag)) continue;
-      const document = parser.parseFromString(note.getNote(), "text/html");
-      const root = document.body.querySelector("div[data-schema-version]") || document.body;
-      for (const heading of root.querySelectorAll("h3")) {
-        entries.push({ ...this.headingMatchData(heading), noteID: note.id });
+    let stage = "读取当前 PDF";
+    try {
+      const reader = this.currentPDFReader();
+      if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
+      stage = "读取符合条件的高亮";
+      const highlights = this.currentFormatHighlights(reader);
+      stage = "读取当前 PDF 附件";
+      const attachment = await Zotero.Items.getAsync(reader.itemID);
+      if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+      stage = "读取父文献";
+      const parent = await Zotero.Items.getAsync(attachment.parentID);
+      if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。");
+      stage = "读取生词本笔记";
+      const notes = await Zotero.Items.getAsync(parent.getNotes());
+      const parser = new DOMParser();
+      const entries = [];
+      for (const note of notes) {
+        if (note.deleted || !note.hasTag(this.tag)) continue;
+        stage = "解析生词本词条";
+        const document = parser.parseFromString(note.getNote(), "text/html");
+        const root = document.body.querySelector("div[data-schema-version]") || document.body;
+        for (const heading of root.querySelectorAll("h3")) {
+          entries.push({ ...this.headingMatchData(heading), noteID: note.id });
+        }
       }
+      stage = "匹配高亮与词条";
+      const rows = highlights.map(highlight => {
+        const entry = entries.find(item => this.highlightMatchMethod(item, highlight));
+        return {
+          id: highlight.id,
+          word: highlight.word,
+          pageLabel: highlight.pageLabel,
+          method: entry ? this.highlightMatchMethod(entry, highlight) : "",
+          entryWord: entry?.word || "",
+          entryAnnotationID: entry?.annotationID || ""
+        };
+      });
+      // Preferences runs in a less-privileged document. Return serialized data
+      // so Gecko never needs to marshal an array across the privilege boundary.
+      return JSON.stringify({ scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows });
+    } catch (error) {
+      return JSON.stringify({ error: String(error?.message || error), stage, stack: String(error?.stack || "") });
     }
-    const rows = highlights.map(highlight => {
-      const entry = entries.find(item => this.highlightMatchMethod(item, highlight));
-      return {
-        id: highlight.id,
-        word: highlight.word,
-        pageLabel: highlight.pageLabel,
-        method: entry ? this.highlightMatchMethod(entry, highlight) : "",
-        entryWord: entry?.word || "",
-        entryAnnotationID: entry?.annotationID || ""
-      };
-    });
-    // Preferences runs in a less-privileged document. Return serialized data
-    // so Gecko never needs to marshal an array across the privilege boundary.
-    return JSON.stringify({ scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows });
   }
   async findSavedWord(attachmentID, word) {
     const attachment = await Zotero.Items.getAsync(attachmentID);
