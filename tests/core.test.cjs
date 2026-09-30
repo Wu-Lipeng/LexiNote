@@ -129,6 +129,16 @@ test('saved-word source links use the concise current page label', () => {
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC'}), '查看位置');
 });
+test('current-format highlights only include configured single-word annotations', () => {
+  const {app}=runtime();
+  app.readerInternal=()=>({_annotationManager:{_annotations:[
+    {id:'one',type:'highlight',color:'#c0c0c0',text:'Present',position:{pageIndex:2}},
+    {id:'two',type:'underline',color:'#c0c0c0',text:'skip',position:{pageIndex:3}},
+    {id:'three',type:'highlight',color:'#ff0000',text:'skip',position:{pageIndex:4}},
+    {id:'four',type:'highlight',color:'#c0c0c0',text:'two words',position:{pageIndex:5}}
+  ]}});
+  assert.deepEqual(JSON.parse(JSON.stringify(app.currentFormatHighlights({}))), [{id:'one',word:'Present',normalizedWord:'present',pageIndex:2,pageLabel:'3'}]);
+});
 test('candidate lookup keeps successful spellings and reports no usable result', async () => {
   const {app}=runtime();
   app.lookup=async word=>{

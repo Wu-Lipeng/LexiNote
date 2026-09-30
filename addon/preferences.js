@@ -80,6 +80,17 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       return false;
     };
     $("save").addEventListener("click", () => saveConfig());
+    $("syncHighlights").addEventListener("click", async () => {
+      if (!window.confirm("将保存当前设置，并扫描当前 PDF 中符合当前标记样式和颜色的单词高亮，更新已存在生词条目的格式。查询词、释义、音标和例句不会改变。是否继续？")) return;
+      $("syncHighlights").disabled = true;
+      try {
+        if (!await saveConfig()) return;
+        $("status").textContent = "正在扫描当前 PDF 的高亮…";
+        const result = await app.syncCurrentPDFHighlightsToNotebook();
+        $("status").textContent = `已扫描 ${result.scanned} 个符合条件的高亮，匹配 ${result.matched} 个词条，更新 ${result.updated} 本生词本。`;
+      } catch (e) { $("status").textContent = e.message; }
+      finally { $("syncHighlights").disabled = false; }
+    });
     const setFieldVisible = (id, visible) => {
       const field = $(id);
       const controlLabel = id === "useBaiduTrial" ? field.parentElement : null;

@@ -565,34 +565,97 @@ var LexiNoteRuntime = class {
     link.textContent = pageLabel ? "第 " + pageLabel + " 页" : "查看位置";
     return link;
   }
-  updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex) {
-    let changed = false;
+  updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex, annotationID = "", replaceOriginalWord = false) {
+    const before = document.body.innerHTML;
     let sourceLine = this.entrySourceLine(heading);
-    const storedOriginalWord = sourceLine?.textContent.match(/^原文词：(.+?) · /)?.[1] || originalWord;
+    const savedOriginalWord = sourceLine?.textContent.match(/^原文词：(.+?) · /)?.[1];
+    const storedOriginalWord = replaceOriginalWord ? originalWord : (savedOriginalWord || originalWord);
     const normalizedOriginalWord = LexiNoteCore.normalize(storedOriginalWord);
-    if (heading.dataset.lexinoteWord !== LexiNoteCore.normalize(heading.textContent.trim())) {
-      heading.dataset.lexinoteWord = LexiNoteCore.normalize(heading.textContent.trim()); changed = true;
+    heading.dataset.lexinoteWord = LexiNoteCore.normalize(heading.textContent.trim());
+    heading.dataset.lexinoteOriginalWord = normalizedOriginalWord;
+    const existingAnnotationID = (() => {
+      try { return new URL(sourceLine?.querySelector?.('a[href^="zotero://open-pdf/"]')?.href || "").searchParams.get("annotation") || heading.dataset.lexinoteAnnotationId || ""; }
+      catch (_) { return heading.dataset.lexinoteAnnotationId || ""; }
+    })();
+    const effectiveAnnotationID = annotationID || existingAnnotationID;
+    if (effectiveAnnotationID) {
+      heading.dataset.lexinoteAnnotationId = effectiveAnnotationID;
+      heading.dataset.lexinoteAttachmentId = String(attachment.id);
     }
-    if (heading.dataset.lexinoteOriginalWord !== normalizedOriginalWord) {
-      heading.dataset.lexinoteOriginalWord = normalizedOriginalWord; changed = true;
-    }
-    let link = sourceLine?.querySelector?.('a[href^="zotero://open-pdf/"]');
     if (!sourceLine) {
       sourceLine = document.createElement("p");
       let nextHeading = heading.nextElementSibling;
       while (nextHeading && nextHeading.tagName !== "H3") nextHeading = nextHeading.nextElementSibling;
       root.insertBefore(sourceLine, nextHeading);
-      link = this.createSourceLink(document, attachment, pageLabel, pageIndex);
-      sourceLine.append(document.createTextNode("原文词：" + storedOriginalWord + " · "), link);
-      return true;
     }
+    const previousLink = sourceLine.querySelector?.('a[href^="zotero://open-pdf/"]');
     const suffix = [];
-    for (let node = link.nextSibling; node; node = node.nextSibling) suffix.push(node);
-    const expectedPrefix = "原文词：" + storedOriginalWord + " · ";
-    if (sourceLine.textContent.startsWith(expectedPrefix) && link.textContent === this.sourceLinkText(link)) return changed;
-    link.textContent = this.sourceLinkText(link);
-    sourceLine.replaceChildren(document.createTextNode(expectedPrefix), link, ...suffix);
-    return true;
+    for (let node = previousLink?.nextSibling; node; node = node.nextSibling) suffix.push(node);
+    const link = this.createSourceLink(document, attachment, pageLabel, pageIndex);
+    if (effectiveAnnotationID) {
+      const url = new URL(link.href); url.searchParams.set("annotation", effectiveAnnotationID); link.href = url.href;
+    }
+    sourceLine.replaceChildren(document.createTextNode("原文词：" + storedOriginalWord + " · "), link, ...suffix);
+    return document.body.innerHTML !== before;
+  }
+  currentPDFReader() {
+    try {
+      const main = Zotero.getMainWindow?.();
+      const tabID = main?.Zotero_Tabs?.selectedID;
+      const direct = tabID && Zotero.Reader.getByTabID?.(tabID);
+      if (direct?.itemID) return direct;
+      const readers = Zotero.Reader._readers;
+      const values = readers instanceof Map ? [...readers.values()] : Object.values(readers || {});
+      return values.find(reader => reader?.itemID) || null;
+    } catch (_) { return null; }
+  }
+  currentFormatHighlights(reader) {
+    try {
+      const annotations = this.readerInternal(reader)?._annotationManager?._annotations;
+      const values = annotations instanceof Map ? [...annotations.values()] : (Array.isArray(annotations) ? annotations : Object.values(annotations || {}));
+      const expectedColor = String(this.config.highlightColor || "").toLowerCase();
+      const seen = new Set();
+      return values.flatMap(annotation => {
+        const word = LexiNoteCore.wordFrom(annotation?.text);
+        const pageIndex = annotation?.position?.pageIndex;
+        if (!annotation?.id || annotation.type !== this.config.highlightType || String(annotation.color || "").toLowerCase() !== expectedColor
+          || !word || !Number.isInteger(pageIndex) || seen.has(annotation.id)) return [];
+        seen.add(annotation.id);
+        return [{ id: annotation.id, word, normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(annotation.pageLabel || pageIndex + 1) }];
+      });
+    } catch (_) { return []; }
+  }
+  async syncCurrentPDFHighlightsToNotebook() {
+    const reader = this.currentPDFReader();
+    if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。" );
+    const highlights = this.currentFormatHighlights(reader);
+    if (!highlights.length) return { scanned: 0, matched: 0, updated: 0 };
+    const attachment = await Zotero.Items.getAsync(reader.itemID);
+    if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。" );
+    const parent = await Zotero.Items.getAsync(attachment.parentID);
+    if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。" );
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    const parser = new DOMParser();
+    let matched = 0, updated = 0;
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag(this.tag)) continue;
+      if (!note.isEditable?.()) throw new Error("生词本笔记不可编辑，无法更新格式。" );
+      const document = parser.parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      const before = document.body.innerHTML;
+      for (const highlight of highlights) {
+        const heading = [...root.querySelectorAll("h3")].find(item => this.matchesSavedWord(item, highlight.normalizedWord));
+        if (!heading) continue;
+        matched++;
+        this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+      }
+      if (document.body.innerHTML !== before) {
+        note.setNote(document.body.innerHTML);
+        await note.saveTx();
+        updated++;
+      }
+    }
+    return { scanned: highlights.length, matched, updated };
   }
   async findSavedWord(attachmentID, word) {
     const attachment = await Zotero.Items.getAsync(attachmentID);
