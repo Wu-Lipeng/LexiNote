@@ -85,10 +85,10 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("syncHighlights").disabled = true;
       try {
         if (!await saveConfig()) return;
-        $("status").textContent = "正在扫描当前 PDF 的高亮…";
+        $("syncStatus").textContent = "正在扫描当前 PDF 的高亮…";
         const result = await app.syncCurrentPDFHighlightsToNotebook();
-        $("status").textContent = `已扫描 ${result.scanned} 个符合条件的高亮，匹配 ${result.matched} 个词条，更新 ${result.updated} 本生词本。`;
-      } catch (e) { $("status").textContent = e.message; }
+        $("syncStatus").textContent = `已扫描 ${result.scanned} 个符合条件的高亮，匹配 ${result.matched} 个词条，更新 ${result.updated} 本生词本。`;
+      } catch (e) { $("syncStatus").textContent = e.message; }
       finally { $("syncHighlights").disabled = false; }
     });
     const setFieldVisible = (id, visible) => {

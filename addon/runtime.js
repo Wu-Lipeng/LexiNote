@@ -544,6 +544,13 @@ var LexiNoteRuntime = class {
       || heading.dataset.lexinoteOriginalWord === normalizedWord
       || LexiNoteCore.normalize(heading.textContent.trim()) === normalizedWord;
   }
+  annotationIDForHeading(heading) {
+    if (heading.dataset.lexinoteAnnotationId) return heading.dataset.lexinoteAnnotationId;
+    try {
+      const source = this.entrySourceLine(heading)?.querySelector?.('a[href^="zotero://open-pdf/"]');
+      return new URL(source?.href || "").searchParams.get("annotation") || "";
+    } catch (_) { return ""; }
+  }
   entrySourceLine(heading) {
     for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
       if (element.querySelector?.('a[href^="zotero://open-pdf/"]')) return element;
@@ -645,7 +652,9 @@ var LexiNoteRuntime = class {
       const before = document.body.innerHTML;
       for (const highlight of highlights) {
         if (!highlight.normalizedWord) continue;
-        const heading = [...root.querySelectorAll("h3")].find(item => this.matchesSavedWord(item, highlight.normalizedWord));
+        const heading = [...root.querySelectorAll("h3")].find(item =>
+          this.annotationIDForHeading(item) === highlight.id || this.matchesSavedWord(item, highlight.normalizedWord)
+        );
         if (!heading) continue;
         matched++;
         this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);

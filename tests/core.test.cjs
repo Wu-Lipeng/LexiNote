@@ -124,6 +124,7 @@ test('saved-word matching accepts the query word, original selection, and legacy
   assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'went'), true);
   assert.equal(app.matchesSavedWord({dataset:{},textContent:'Present'}, 'present'), true);
   assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'gone'), false);
+  assert.equal(app.annotationIDForHeading({dataset:{lexinoteAnnotationId:'annotation-1'}}), 'annotation-1');
 });
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
