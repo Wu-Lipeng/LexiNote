@@ -33,8 +33,7 @@ var LexiNoteRuntime = class {
       scripts: [this.rootURI + "preferences.js"]
     });
     Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.handler, this.id);
-    this.noteLocatorTimer = setInterval(() => this.attachOpenNoteLocators(), 1000);
-    this.attachOpenNoteLocators();
+    this.updateNoteLocatorScanning();
   }
   getKey() {
     return this.getCredential("Generic API Key") || this.getCredential("API key");
@@ -95,6 +94,7 @@ var LexiNoteRuntime = class {
     Zotero.Prefs.set(this.pref, JSON.stringify(config), true);
     this.config = runtimeConfig;
     this.revision++;
+    this.updateNoteLocatorScanning();
     this.clearCache();
     for (const popup of [...this.popups]) popup.dispose();
   }
@@ -718,6 +718,34 @@ var LexiNoteRuntime = class {
     document.addEventListener("mouseup", locate);
     this.noteLocatorDocuments.set(document, { locate, root });
   }
+  detachNoteLocator(document, handlers) {
+    document.removeEventListener("click", handlers.locate);
+    document.removeEventListener("mouseup", handlers.locate);
+    handlers.root?.removeAttribute("data-lexinote-locator-attached");
+    this.noteLocatorDocuments.delete(document);
+  }
+  clearNoteLocators() {
+    for (const [document, handlers] of this.noteLocatorDocuments) this.detachNoteLocator(document, handlers);
+  }
+  updateNoteLocatorScanning() {
+    if (this.config.noteLocateMode === "off") {
+      clearInterval(this.noteLocatorTimer);
+      this.noteLocatorTimer = null;
+      this.clearNoteLocators();
+      return;
+    }
+    if (this.noteLocatorTimer) return;
+    this.attachOpenNoteLocators();
+    // Editor discovery is only needed while source locating is enabled. A
+    // modest interval handles manually opened notes without polling the
+    // complete Zotero window every second.
+    this.noteLocatorTimer = setInterval(() => this.attachOpenNoteLocators(), 5000);
+  }
+  pruneNoteLocators() {
+    for (const [document, handlers] of this.noteLocatorDocuments) {
+      if (document.defaultView?.closed || !handlers.root?.isConnected) this.detachNoteLocator(document, handlers);
+    }
+  }
   async openSourceLocation(href, annotationID = "") {
     try {
       const url = new URL(href);
@@ -750,6 +778,7 @@ var LexiNoteRuntime = class {
   attachOpenNoteLocators() {
     if (!this.alive) return;
     try {
+      this.pruneNoteLocators();
       const context = Zotero.getMainWindow?.()?.ZoteroContextPane?.context;
       for (const library of Zotero.Libraries.getAll?.() || []) {
         const editor = context?._getNotesContext?.(library.libraryID)?._getCurrentEditor?.();
@@ -835,11 +864,8 @@ var LexiNoteRuntime = class {
     this.alive = false;
     Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.handler);
     clearInterval(this.noteLocatorTimer);
-    for (const [document, handlers] of this.noteLocatorDocuments) {
-      document.removeEventListener("click", handlers.locate); document.removeEventListener("mouseup", handlers.locate);
-      handlers.root?.removeAttribute("data-lexinote-locator-attached");
-    }
-    this.noteLocatorDocuments.clear();
+    this.noteLocatorTimer = null;
+    this.clearNoteLocators();
     for (const popup of [...this.popups]) popup.dispose();
     this.clearCache();
   }

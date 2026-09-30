@@ -69,7 +69,7 @@ function runtime(initialConfig = base, credentials = {}) {
     abort() { this.aborted = true; this.onabort?.(); }
     respond(status, value) { this.status=status; this.responseText=JSON.stringify(value); this.onload?.(); }
   }
-  const context = vm.createContext({ LexiNoteCore:C, LexiNoteTrialCredentials:{baiduApiKey:'trial-key',baiduSecretKey:'trial-secret'}, XMLHttpRequest:FakeXHR, URL, setTimeout,clearTimeout,
+  const context = vm.createContext({ LexiNoteCore:C, LexiNoteTrialCredentials:{baiduApiKey:'trial-key',baiduSecretKey:'trial-secret'}, XMLHttpRequest:FakeXHR, URL, setTimeout,clearTimeout,setInterval,clearInterval,
     Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}}}, Services:{logins:{findLogins:(_,__,name)=>credentials[name] ? [{password:credentials[name]}] : []}} });
   vm.runInContext(fs.readFileSync(require.resolve('../addon/runtime.js'),'utf8'),context);
   const app = vm.runInContext('new LexiNoteRuntime({id:"test",rootURI:""})',context);
