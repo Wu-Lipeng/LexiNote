@@ -564,6 +564,16 @@ var LexiNoteRuntime = class {
     if (entryAnnotationID && entryAnnotationID === highlightID) return "annotation";
     return entryNormalizedWord === highlightNormalizedWord || entryNormalizedOriginalWord === highlightNormalizedWord ? "word" : "";
   }
+  indexHeadings(headings) {
+    const byAnnotationID = Object.create(null), byWord = Object.create(null);
+    for (const heading of headings) {
+      const entry = this.headingMatchData(heading);
+      if (entry.annotationID) byAnnotationID[entry.annotationID] = heading;
+      if (entry.normalizedWord) byWord[entry.normalizedWord] = heading;
+      if (entry.normalizedOriginalWord) byWord[entry.normalizedOriginalWord] = heading;
+    }
+    return { byAnnotationID, byWord };
+  }
   entrySourceLine(heading) {
     for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
       if (element.querySelector?.('a[href^="zotero://open-pdf/"]')) return element;
@@ -663,12 +673,10 @@ var LexiNoteRuntime = class {
       const document = parser.parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
       const before = document.body.innerHTML;
+      const index = this.indexHeadings(root.querySelectorAll("h3"));
       for (const highlight of highlights) {
         if (!highlight.normalizedWord) continue;
-        const heading = [...root.querySelectorAll("h3")].find(item => {
-          const entry = this.headingMatchData(item);
-          return this.highlightMatchMethod(entry.annotationID, entry.normalizedWord, entry.normalizedOriginalWord, highlight.id, highlight.normalizedWord);
-        });
+        const heading = index.byAnnotationID[highlight.id] || index.byWord[highlight.normalizedWord];
         if (!heading) continue;
         matched++;
         this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
@@ -708,17 +716,25 @@ var LexiNoteRuntime = class {
         }
       }
       stage = "匹配高亮与词条";
-      const rows = highlights.map(highlight => {
-        const entry = entries.find(item => this.highlightMatchMethod(item.annotationID, item.normalizedWord, item.normalizedOriginalWord, highlight.id, highlight.normalizedWord));
-        return {
+      const byAnnotationID = Object.create(null), byWord = Object.create(null);
+      for (const entry of entries) {
+        if (entry.annotationID) byAnnotationID[entry.annotationID] = entry;
+        if (entry.normalizedWord) byWord[entry.normalizedWord] = entry;
+        if (entry.normalizedOriginalWord) byWord[entry.normalizedOriginalWord] = entry;
+      }
+      const rows = [];
+      for (const highlight of highlights) {
+        const entry = byAnnotationID[highlight.id] || byWord[highlight.normalizedWord] || null;
+        const method = entry ? (entry.annotationID === highlight.id ? "annotation" : "word") : "";
+        rows.push({
           id: highlight.id,
           word: highlight.word,
           pageLabel: highlight.pageLabel,
-          method: entry ? this.highlightMatchMethod(entry.annotationID, entry.normalizedWord, entry.normalizedOriginalWord, highlight.id, highlight.normalizedWord) : "",
+          method,
           entryWord: entry?.word || "",
           entryAnnotationID: entry?.annotationID || ""
-        };
-      });
+        });
+      }
       // Preferences runs in a less-privileged document. Return serialized data
       // so Gecko never needs to marshal an array across the privilege boundary.
       return JSON.stringify({ scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows });
