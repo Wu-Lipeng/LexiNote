@@ -121,7 +121,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
               const outcome = JSON.parse(await app.syncManualHighlightToNotebook(row.id, input.value));
               if (!outcome.matched) throw new Error("未找到该生词条目，请检查输入的查询词或原文词。");
               $("syncStatus").textContent = outcome.updated ? "已手动匹配并更新词条格式。" : "已匹配；词条已经是当前格式。";
-              button.textContent = "已匹配";
+              renderSyncDiagnostics(JSON.parse(await app.diagnoseCurrentPDFHighlightMatches()));
             } catch (e) { $("syncStatus").textContent = e.message; input.disabled = false; button.disabled = false; }
           });
           action.append(input, document.createElement("br"), button);
