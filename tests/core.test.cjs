@@ -125,7 +125,7 @@ test('saved-word matching accepts the query word, original selection, and legacy
   assert.equal(app.matchesSavedWord({dataset:{},textContent:'Present'}, 'present'), true);
   assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'gone'), false);
   assert.equal(app.annotationIDForHeading({dataset:{lexinoteAnnotationId:'annotation-1'}}), 'annotation-1');
-  assert.equal(app.highlightMatchMethod({annotationID:'annotation-1',normalizedWord:'other',normalizedOriginalWord:''}, {id:'annotation-1',normalizedWord:'missing'}), 'annotation');
+  assert.equal(app.highlightMatchMethod('annotation-1', 'other', '', 'annotation-1', 'missing'), 'annotation');
 });
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
