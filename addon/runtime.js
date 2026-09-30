@@ -644,6 +644,7 @@ var LexiNoteRuntime = class {
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
       const before = document.body.innerHTML;
       for (const highlight of highlights) {
+        if (!highlight.normalizedWord) continue;
         const heading = [...root.querySelectorAll("h3")].find(item => this.matchesSavedWord(item, highlight.normalizedWord));
         if (!heading) continue;
         matched++;

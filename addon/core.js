@@ -22,7 +22,7 @@ var LexiNoteCore = (() => {
     if (!/^[A-Z][a-z]+(?:['-][A-Za-z]+)*$/.test(value)) return [value];
     return [value, value[0].toLowerCase() + value.slice(1)];
   }
-  function normalize(word) { return word.normalize("NFC").toLocaleLowerCase("en-US"); }
+  function normalize(word) { return String(word || "").normalize("NFC").toLocaleLowerCase("en-US"); }
   function json(value, label) {
     try { return JSON.parse(value); }
     catch (_) { throw new Error(label + "必须是有效 JSON。"); }

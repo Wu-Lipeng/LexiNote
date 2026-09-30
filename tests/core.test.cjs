@@ -14,6 +14,7 @@ test('Unicode single words; reject sentences and oversized selection', () => {
   assert.equal(C.wordFrom('two words'), '');
   assert.equal(C.wordFrom('a'.repeat(81)), '');
   assert.equal(C.wordFrom('<script>'), '');
+  assert.equal(C.normalize(undefined), '');
 });
 test('title-case English words include a lower-case lookup candidate', () => {
   assert.deepEqual(C.wordCandidates('Present'), ['Present', 'present']);
