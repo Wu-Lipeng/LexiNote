@@ -551,9 +551,18 @@ var LexiNoteRuntime = class {
       return new URL(source?.href || "").searchParams.get("annotation") || "";
     } catch (_) { return ""; }
   }
-  highlightMatchMethod(heading, highlight) {
-    if (this.annotationIDForHeading(heading) === highlight.id) return "annotation";
-    return this.matchesSavedWord(heading, highlight.normalizedWord) ? "word" : "";
+  headingMatchData(heading) {
+    const word = String(heading.textContent || "").trim();
+    return {
+      word,
+      normalizedWord: heading.dataset.lexinoteWord || LexiNoteCore.normalize(word),
+      normalizedOriginalWord: heading.dataset.lexinoteOriginalWord || "",
+      annotationID: this.annotationIDForHeading(heading)
+    };
+  }
+  highlightMatchMethod(entry, highlight) {
+    if (entry.annotationID && entry.annotationID === highlight.id) return "annotation";
+    return entry.normalizedWord === highlight.normalizedWord || entry.normalizedOriginalWord === highlight.normalizedWord ? "word" : "";
   }
   entrySourceLine(heading) {
     for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
@@ -656,7 +665,7 @@ var LexiNoteRuntime = class {
       const before = document.body.innerHTML;
       for (const highlight of highlights) {
         if (!highlight.normalizedWord) continue;
-        const heading = [...root.querySelectorAll("h3")].find(item => this.highlightMatchMethod(item, highlight));
+        const heading = [...root.querySelectorAll("h3")].find(item => this.highlightMatchMethod(this.headingMatchData(item), highlight));
         if (!heading) continue;
         matched++;
         this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
@@ -685,16 +694,16 @@ var LexiNoteRuntime = class {
       const document = parser.parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
       for (const heading of root.querySelectorAll("h3")) {
-        entries.push({ heading, word: heading.textContent.trim(), noteID: note.id, annotationID: this.annotationIDForHeading(heading) });
+        entries.push({ ...this.headingMatchData(heading), noteID: note.id });
       }
     }
     const rows = highlights.map(highlight => {
-      const entry = entries.find(item => this.highlightMatchMethod(item.heading, highlight));
+      const entry = entries.find(item => this.highlightMatchMethod(item, highlight));
       return {
         id: highlight.id,
         word: highlight.word,
         pageLabel: highlight.pageLabel,
-        method: entry ? this.highlightMatchMethod(entry.heading, highlight) : "",
+        method: entry ? this.highlightMatchMethod(entry, highlight) : "",
         entryWord: entry?.word || "",
         entryAnnotationID: entry?.annotationID || ""
       };
