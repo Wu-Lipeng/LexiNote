@@ -708,7 +708,9 @@ var LexiNoteRuntime = class {
         entryAnnotationID: entry?.annotationID || ""
       };
     });
-    return { scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows };
+    // Preferences runs in a less-privileged document. Return serialized data
+    // so Gecko never needs to marshal an array across the privilege boundary.
+    return JSON.stringify({ scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows });
   }
   async findSavedWord(attachmentID, word) {
     const attachment = await Zotero.Items.getAsync(attachmentID);

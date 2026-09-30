@@ -111,7 +111,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("diagnoseHighlights").addEventListener("click", async () => {
       $("diagnoseHighlights").disabled = true;
       $("syncDiagnostics").textContent = "正在读取当前 PDF 和生词本…";
-      try { renderSyncDiagnostics(await app.diagnoseCurrentPDFHighlightMatches()); }
+      try { renderSyncDiagnostics(JSON.parse(await app.diagnoseCurrentPDFHighlightMatches())); }
       catch (e) { $("syncDiagnostics").textContent = e.message; }
       finally { $("diagnoseHighlights").disabled = false; }
     });
