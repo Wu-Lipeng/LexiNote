@@ -639,39 +639,33 @@ var LexiNoteRuntime = class {
       return values.find(reader => reader?.itemID) || null;
     } catch (_) { return null; }
   }
-  plainReaderAnnotation(reader, annotation) {
+  async currentFormatHighlights(attachment) {
     try {
-      const frame = this.readerFrame(reader);
-      const source = typeof Components !== "undefined" ? Components.utils.waiveXrays(annotation) : annotation;
-      const encoded = frame?.JSON?.stringify ? frame.JSON.stringify(source) : JSON.stringify(source);
-      return JSON.parse(encoded);
-    } catch (_) { return null; }
-  }
-  currentFormatHighlights(reader) {
-    try {
-      const annotations = this.readerInternal(reader)?._annotationManager?._annotations;
-      const values = annotations instanceof Map ? [...annotations.values()] : (Array.isArray(annotations) ? annotations : Object.values(annotations || {}));
+      const raw = attachment.getAnnotations?.() || [];
+      const values = raw.length && typeof raw[0] === "object" ? raw : await Zotero.Items.getAsync(raw);
       const expectedColor = String(this.config.highlightColor || "").toLowerCase();
       const seen = new Set();
       return values.flatMap(annotation => {
-        const plain = this.plainReaderAnnotation(reader, annotation);
-        const word = LexiNoteCore.wordFrom(plain?.text);
-        const pageIndex = plain?.position?.pageIndex;
-        const id = String(plain?.id || "");
-        if (!id || plain.type !== this.config.highlightType || String(plain.color || "").toLowerCase() !== expectedColor
+        let position;
+        try { position = typeof annotation.annotationPosition === "string" ? JSON.parse(annotation.annotationPosition) : annotation.annotationPosition; }
+        catch (_) { return []; }
+        const word = LexiNoteCore.wordFrom(annotation.annotationText);
+        const pageIndex = position?.pageIndex;
+        const id = String(annotation.key || annotation.id || "");
+        if (!id || annotation.annotationType !== this.config.highlightType || String(annotation.annotationColor || "").toLowerCase() !== expectedColor
           || !word || !Number.isInteger(pageIndex) || seen.has(id)) return [];
         seen.add(id);
-        return [{ id, word: String(word), normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(plain.pageLabel || pageIndex + 1) }];
+        return [{ id, word: String(word), normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(annotation.annotationPageLabel || pageIndex + 1) }];
       });
     } catch (_) { return []; }
   }
   async syncCurrentPDFHighlightsToNotebook() {
     const reader = this.currentPDFReader();
     if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。" );
-    const highlights = this.currentFormatHighlights(reader);
-    if (!highlights.length) return { scanned: 0, matched: 0, updated: 0 };
     const attachment = await Zotero.Items.getAsync(reader.itemID);
     if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。" );
+    const highlights = await this.currentFormatHighlights(attachment);
+    if (!highlights.length) return { scanned: 0, matched: 0, updated: 0 };
     const parent = await Zotero.Items.getAsync(attachment.parentID);
     if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。" );
     const notes = await Zotero.Items.getAsync(parent.getNotes());
@@ -704,11 +698,11 @@ var LexiNoteRuntime = class {
     try {
       const reader = this.currentPDFReader();
       if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
-      stage = "读取符合条件的高亮";
-      const highlights = this.currentFormatHighlights(reader);
       stage = "读取当前 PDF 附件";
       const attachment = await Zotero.Items.getAsync(reader.itemID);
       if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+      stage = "读取符合条件的高亮";
+      const highlights = await this.currentFormatHighlights(attachment);
       stage = "读取父文献";
       const parent = await Zotero.Items.getAsync(attachment.parentID);
       if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。");
