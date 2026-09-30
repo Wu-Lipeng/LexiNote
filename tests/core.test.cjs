@@ -134,6 +134,7 @@ test('saved-word source links use the concise current page label', () => {
 });
 test('current-format highlights only include configured single-word annotations', () => {
   const {app}=runtime();
+  app.plainReaderAnnotation=(_, annotation)=>annotation;
   app.readerInternal=()=>({_annotationManager:{_annotations:[
     {id:'one',type:'highlight',color:'#c0c0c0',text:'Present',position:{pageIndex:2}},
     {id:'two',type:'underline',color:'#c0c0c0',text:'skip',position:{pageIndex:3}},

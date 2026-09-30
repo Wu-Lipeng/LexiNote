@@ -639,6 +639,14 @@ var LexiNoteRuntime = class {
       return values.find(reader => reader?.itemID) || null;
     } catch (_) { return null; }
   }
+  plainReaderAnnotation(reader, annotation) {
+    try {
+      const frame = this.readerFrame(reader);
+      const source = typeof Components !== "undefined" ? Components.utils.waiveXrays(annotation) : annotation;
+      const encoded = frame?.JSON?.stringify ? frame.JSON.stringify(source) : JSON.stringify(source);
+      return JSON.parse(encoded);
+    } catch (_) { return null; }
+  }
   currentFormatHighlights(reader) {
     try {
       const annotations = this.readerInternal(reader)?._annotationManager?._annotations;
@@ -646,12 +654,14 @@ var LexiNoteRuntime = class {
       const expectedColor = String(this.config.highlightColor || "").toLowerCase();
       const seen = new Set();
       return values.flatMap(annotation => {
-        const word = LexiNoteCore.wordFrom(annotation?.text);
-        const pageIndex = annotation?.position?.pageIndex;
-        if (!annotation?.id || annotation.type !== this.config.highlightType || String(annotation.color || "").toLowerCase() !== expectedColor
-          || !word || !Number.isInteger(pageIndex) || seen.has(annotation.id)) return [];
-        seen.add(annotation.id);
-        return [{ id: annotation.id, word, normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(annotation.pageLabel || pageIndex + 1) }];
+        const plain = this.plainReaderAnnotation(reader, annotation);
+        const word = LexiNoteCore.wordFrom(plain?.text);
+        const pageIndex = plain?.position?.pageIndex;
+        const id = String(plain?.id || "");
+        if (!id || plain.type !== this.config.highlightType || String(plain.color || "").toLowerCase() !== expectedColor
+          || !word || !Number.isInteger(pageIndex) || seen.has(id)) return [];
+        seen.add(id);
+        return [{ id, word: String(word), normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(plain.pageLabel || pageIndex + 1) }];
       });
     } catch (_) { return []; }
   }
