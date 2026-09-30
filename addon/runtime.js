@@ -551,6 +551,10 @@ var LexiNoteRuntime = class {
       return new URL(source?.href || "").searchParams.get("annotation") || "";
     } catch (_) { return ""; }
   }
+  highlightMatchMethod(heading, highlight) {
+    if (this.annotationIDForHeading(heading) === highlight.id) return "annotation";
+    return this.matchesSavedWord(heading, highlight.normalizedWord) ? "word" : "";
+  }
   entrySourceLine(heading) {
     for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
       if (element.querySelector?.('a[href^="zotero://open-pdf/"]')) return element;
@@ -652,9 +656,7 @@ var LexiNoteRuntime = class {
       const before = document.body.innerHTML;
       for (const highlight of highlights) {
         if (!highlight.normalizedWord) continue;
-        const heading = [...root.querySelectorAll("h3")].find(item =>
-          this.annotationIDForHeading(item) === highlight.id || this.matchesSavedWord(item, highlight.normalizedWord)
-        );
+        const heading = [...root.querySelectorAll("h3")].find(item => this.highlightMatchMethod(item, highlight));
         if (!heading) continue;
         matched++;
         this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
@@ -666,6 +668,38 @@ var LexiNoteRuntime = class {
       }
     }
     return { scanned: highlights.length, matched, updated };
+  }
+  async diagnoseCurrentPDFHighlightMatches() {
+    const reader = this.currentPDFReader();
+    if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
+    const highlights = this.currentFormatHighlights(reader);
+    const attachment = await Zotero.Items.getAsync(reader.itemID);
+    if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+    const parent = await Zotero.Items.getAsync(attachment.parentID);
+    if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。");
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    const parser = new DOMParser();
+    const entries = [];
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag(this.tag)) continue;
+      const document = parser.parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      for (const heading of root.querySelectorAll("h3")) {
+        entries.push({ heading, word: heading.textContent.trim(), noteID: note.id, annotationID: this.annotationIDForHeading(heading) });
+      }
+    }
+    const rows = highlights.map(highlight => {
+      const entry = entries.find(item => this.highlightMatchMethod(item.heading, highlight));
+      return {
+        id: highlight.id,
+        word: highlight.word,
+        pageLabel: highlight.pageLabel,
+        method: entry ? this.highlightMatchMethod(entry.heading, highlight) : "",
+        entryWord: entry?.word || "",
+        entryAnnotationID: entry?.annotationID || ""
+      };
+    });
+    return { scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows };
   }
   async findSavedWord(attachmentID, word) {
     const attachment = await Zotero.Items.getAsync(attachmentID);

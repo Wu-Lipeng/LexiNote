@@ -22,6 +22,8 @@
       <html:p style="margin-bottom:0"><html:button id="lexinote-restoreFeatures" type="button">恢复默认设置</html:button> <html:small>只恢复本区域设置，不影响接口配置或已保存凭据。</html:small></html:p>
       <html:p style="margin-bottom:0"><html:button id="lexinote-syncHighlights" type="button">按当前格式同步 PDF 高亮</html:button> <html:small>扫描当前 PDF 中与当前标记样式、颜色一致的单词高亮；仅更新生词本中已匹配词条的结构、原文位置和高亮关联，不改查询结果。</html:small></html:p>
       <html:p id="lexinote-syncStatus" role="status" style="margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere"/>
+      <html:p style="margin-bottom:0"><html:button id="lexinote-diagnoseHighlights" type="button">查看高亮匹配诊断</html:button> <html:small>只读显示当前 PDF 高亮与生词词条的匹配过程，不修改笔记。</html:small></html:p>
+      <html:div id="lexinote-syncDiagnostics" style="margin-top:8px"/>
     </html:section>
     <html:section id="lexinote-interface-settings" style="margin:16px 0;padding:14px;border:1px solid #8885;border-radius:6px">
       <html:h2 style="margin:0 0 10px;font-size:1.15em">接口设置</html:h2>

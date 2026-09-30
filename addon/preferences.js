@@ -91,6 +91,30 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       } catch (e) { $("syncStatus").textContent = e.message; }
       finally { $("syncHighlights").disabled = false; }
     });
+    const renderSyncDiagnostics = result => {
+      const container = $("syncDiagnostics");
+      container.replaceChildren();
+      const summary = document.createElement("p");
+      summary.textContent = `已读取 ${result.scanned} 个符合条件的高亮、${result.entries} 个生词词条；匹配 ${result.matched} 个。`;
+      const table = document.createElement("table"); table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9em";
+      const header = document.createElement("tr");
+      for (const label of ["高亮文本", "页码", "高亮 ID", "匹配结果", "对应词条"]) { const cell = document.createElement("th"); cell.textContent = label; cell.style.cssText = "text-align:left;border-bottom:1px solid #8888;padding:4px"; header.append(cell); }
+      const body = document.createElement("tbody");
+      for (const row of result.rows) {
+        const tr = document.createElement("tr");
+        const status = row.method === "annotation" ? "高亮 ID 精确匹配" : row.method === "word" ? "词条文本匹配" : "未匹配";
+        for (const value of [row.word, row.pageLabel, row.id, status, row.entryWord || "—"]) { const cell = document.createElement("td"); cell.textContent = value; cell.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px;overflow-wrap:anywhere"; tr.append(cell); }
+        body.append(tr);
+      }
+      table.append(header, body); container.append(summary, table);
+    };
+    $("diagnoseHighlights").addEventListener("click", async () => {
+      $("diagnoseHighlights").disabled = true;
+      $("syncDiagnostics").textContent = "正在读取当前 PDF 和生词本…";
+      try { renderSyncDiagnostics(await app.diagnoseCurrentPDFHighlightMatches()); }
+      catch (e) { $("syncDiagnostics").textContent = e.message; }
+      finally { $("diagnoseHighlights").disabled = false; }
+    });
     const setFieldVisible = (id, visible) => {
       const field = $(id);
       const controlLabel = id === "useBaiduTrial" ? field.parentElement : null;
