@@ -103,12 +103,30 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       summary.textContent = `已读取 ${result.scanned} 个符合条件的高亮、${result.entries} 个生词词条；匹配 ${result.matched} 个。`;
       const table = document.createElement("table"); table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9em";
       const header = document.createElement("tr");
-      for (const label of ["高亮文本", "页码", "高亮 ID", "匹配结果", "对应词条"]) { const cell = document.createElement("th"); cell.textContent = label; cell.style.cssText = "text-align:left;border-bottom:1px solid #8888;padding:4px"; header.append(cell); }
+      for (const label of ["高亮文本", "页码", "高亮 ID", "匹配结果", "对应词条", "手动匹配"]) { const cell = document.createElement("th"); cell.textContent = label; cell.style.cssText = "text-align:left;border-bottom:1px solid #8888;padding:4px"; header.append(cell); }
       const body = document.createElement("tbody");
       for (const row of result.rows) {
         const tr = document.createElement("tr");
         const status = row.method === "annotation" ? "高亮 ID 精确匹配" : row.method === "word" ? "词条文本匹配" : "未匹配";
         for (const value of [row.word, row.pageLabel, row.id, status, row.entryWord || "—"]) { const cell = document.createElement("td"); cell.textContent = value; cell.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px;overflow-wrap:anywhere"; tr.append(cell); }
+        const action = document.createElement("td"); action.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px";
+        if (!row.method) {
+          const input = document.createElement("input"); input.type = "text"; input.placeholder = "生词本单词"; input.style.width = "100px";
+          const button = document.createElement("button"); button.type = "button"; button.textContent = "手动匹配";
+          button.addEventListener("click", async () => {
+            input.disabled = true; button.disabled = true;
+            try {
+              if (!await saveConfig()) return;
+              $("syncStatus").textContent = "正在写入手动匹配…";
+              const outcome = JSON.parse(await app.syncManualHighlightToNotebook(row.id, input.value));
+              if (!outcome.matched) throw new Error("未找到该生词条目，请检查输入的查询词或原文词。");
+              $("syncStatus").textContent = outcome.updated ? "已手动匹配并更新词条格式。" : "已匹配；词条已经是当前格式。";
+              button.textContent = "已匹配";
+            } catch (e) { $("syncStatus").textContent = e.message; input.disabled = false; button.disabled = false; }
+          });
+          action.append(input, document.createElement("br"), button);
+        } else action.textContent = "—";
+        tr.append(action);
         body.append(tr);
       }
       table.append(header, body); container.append(summary, table);

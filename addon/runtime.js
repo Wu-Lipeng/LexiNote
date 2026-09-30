@@ -693,6 +693,38 @@ var LexiNoteRuntime = class {
     }
     return { scanned: highlights.length, matched, updated };
   }
+  async syncManualHighlightToNotebook(highlightID, entryWord) {
+    const reader = this.currentPDFReader();
+    if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
+    const normalizedEntryWord = LexiNoteCore.normalize(LexiNoteCore.wordFrom(entryWord));
+    if (!normalizedEntryWord) throw new Error("请输入生词本中的单个单词。");
+    const attachment = await Zotero.Items.getAsync(reader.itemID);
+    if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+    const highlights = await this.currentFormatHighlights(attachment);
+    const highlight = highlights.find(item => item.id === String(highlightID));
+    if (!highlight) throw new Error("未找到该高亮；请重新打开匹配诊断后再试。");
+    const parent = await Zotero.Items.getAsync(attachment.parentID);
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    const parser = new DOMParser();
+    let matched = 0, updated = 0;
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag(this.tag)) continue;
+      if (!note.isEditable?.()) throw new Error("生词本笔记不可编辑，无法更新格式。");
+      const document = parser.parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      const heading = [...root.querySelectorAll("h3")].find(item => this.matchesSavedWord(item, normalizedEntryWord));
+      if (!heading) continue;
+      matched++;
+      const before = document.body.innerHTML;
+      this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+      if (document.body.innerHTML !== before) {
+        note.setNote(document.body.innerHTML);
+        await note.saveTx();
+        updated++;
+      }
+    }
+    return JSON.stringify({ matched, updated });
+  }
   async diagnoseCurrentPDFHighlightMatches() {
     let stage = "读取当前 PDF";
     try {
