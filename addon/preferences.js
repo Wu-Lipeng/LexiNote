@@ -10,7 +10,8 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
     $("openNoteAfterSave").checked = Boolean(app.config.openNoteAfterSave);
     $("autoLocateSavedWord").checked = Boolean(app.config.autoLocateSavedWord);
-    $("noteLocateMode").value = app.config.noteLocateMode || "off";
+    $("noteLocateMode").value = app.config.noteLocateMode || "select";
+    $("showNoteLocateStatus").checked = Boolean(app.config.showNoteLocateStatus);
     const baiduDrafts = {};
     let dirty = false;
     let previousProvider = $("provider").value;
@@ -39,7 +40,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     try { $("key").value = app.getKey(); }
     catch (_) { $("status").textContent = "无法读取凭据存储，请解锁后重新打开设置。"; $("save").disabled = true; }
     const read = () => {
-      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value };
+      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value, showNoteLocateStatus: $("showNoteLocateStatus").checked };
       for (const name of names) config[name] = ["delay", "timeout"].includes(name) ? Number($(name).value) : $(name).value;
       config.baiduApiKey = $("baiduApiKey").value.trim(); config.baiduSecretKey = $("baiduSecretKey").value.trim();
       config.useBaiduTrial = $("useBaiduTrial").checked;
@@ -48,13 +49,14 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     const restoreFeatureDefaults = () => {
       if (!window.confirm("确定恢复功能默认设置吗？接口设置和已保存凭据不会改变。")) return;
       const defaults = typeof LexiNoteCore !== "undefined" ? LexiNoteCore.defaults : {
-        enabled: true, autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, highlightColor: "#c0c0c0", highlightType: "highlight", delay: 350, timeout: 12000
+        enabled: true, autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, noteLocateMode: "select", showNoteLocateStatus: false, highlightColor: "#c0c0c0", highlightType: "highlight", delay: 350, timeout: 12000
       };
       $("enabled").checked = defaults.enabled;
       $("autoHighlight").checked = defaults.autoHighlight;
       $("openNoteAfterSave").checked = defaults.openNoteAfterSave;
       $("autoLocateSavedWord").checked = defaults.autoLocateSavedWord;
       $("noteLocateMode").value = defaults.noteLocateMode;
+      $("showNoteLocateStatus").checked = defaults.showNoteLocateStatus;
       $("highlightColor").value = defaults.highlightColor;
       $("highlightType").value = defaults.highlightType;
       $("delay").value = defaults.delay;
@@ -81,15 +83,29 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     };
     $("save").addEventListener("click", () => saveConfig());
     $("syncHighlights").addEventListener("click", async () => {
-      if (!window.confirm("将保存当前设置，并扫描当前 PDF 中符合当前标记样式和颜色的单词高亮，更新已存在生词条目的格式。查询词、释义、音标和例句不会改变。是否继续？")) return;
+      if (!window.confirm("将双向匹配当前 PDF 的高亮与生词词条，并将匹配词条更新为当前格式。是否继续？")) return;
       $("syncHighlights").disabled = true;
       try {
         if (!await saveConfig()) return;
         $("syncStatus").textContent = "正在扫描当前 PDF 的高亮…";
         const result = await app.syncCurrentPDFHighlightsToNotebook();
-        $("syncStatus").textContent = `已扫描 ${result.scanned} 个符合条件的高亮，匹配 ${result.matched} 个词条，更新 ${result.updated} 本生词本。`;
+        $("syncStatus").textContent = `已更新 ${result.matched} 个匹配词条，更新 ${result.updated} 本生词本。`;
+        try { renderSyncDiagnostics(JSON.parse(await app.diagnoseCurrentPDFHighlightMatches())); }
+        catch (e) { $("syncDiagnostics").textContent = "匹配诊断读取失败：" + e.message; }
       } catch (e) { $("syncStatus").textContent = e.message; }
       finally { $("syncHighlights").disabled = false; }
+    });
+    $("exportWordbook").addEventListener("click", async () => {
+      $("exportWordbook").disabled = true;
+      try {
+        $("status").textContent = "正在读取 LexiNote 生词本…";
+        const result = await app.exportWordbookToFile(window);
+        $("status").textContent = `已导出 ${result.entries} 个词条到：\n${result.path}`;
+      } catch (e) {
+        $("status").textContent = e.message || "导出生词本失败。";
+      } finally {
+        $("exportWordbook").disabled = false;
+      }
     });
     const renderSyncDiagnostics = result => {
       const container = $("syncDiagnostics");
@@ -100,7 +116,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
         container.append(message, stack); return;
       }
       const summary = document.createElement("p");
-      summary.textContent = `已读取 ${result.scanned} 个符合条件的高亮、${result.entries} 个生词词条；匹配 ${result.matched} 个。`;
+      summary.textContent = `匹配结果：${result.matched} 条高亮 ↔ ${result.matchedEntries} 个词条。`;
       const table = document.createElement("table"); table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9em";
       const header = document.createElement("tr");
       for (const label of ["高亮文本", "页码", "高亮 ID", "匹配结果", "对应词条", "手动匹配"]) { const cell = document.createElement("th"); cell.textContent = label; cell.style.cssText = "text-align:left;border-bottom:1px solid #8888;padding:4px"; header.append(cell); }
@@ -108,7 +124,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       for (const row of result.rows) {
         const tr = document.createElement("tr");
         const status = row.method === "annotation" ? "高亮 ID 精确匹配" : row.method === "word" ? "词条文本匹配" : "未匹配";
-        for (const value of [row.word, row.pageLabel, row.id, status, row.entryWord || "—"]) { const cell = document.createElement("td"); cell.textContent = value; cell.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px;overflow-wrap:anywhere"; tr.append(cell); }
+        for (const value of [row.word, row.pageLabel, row.id, status, row.entryWords?.join("、") || "—"]) { const cell = document.createElement("td"); cell.textContent = value; cell.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px;overflow-wrap:anywhere"; tr.append(cell); }
         const action = document.createElement("td"); action.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px";
         if (!row.method) {
           const input = document.createElement("input"); input.type = "text"; input.placeholder = "生词本单词"; input.style.width = "100px";
@@ -130,14 +146,34 @@ var LexiNotePreferences = window.LexiNotePreferences = {
         body.append(tr);
       }
       table.append(header, body); container.append(summary, table);
+      const unmatchedEntries = (result.entryRows || []).filter(row => !row.highlightIDs?.length);
+      if (unmatchedEntries.length) {
+        const entrySummary = document.createElement("p"); entrySummary.textContent = "未关联高亮的生词词条：";
+        const entryTable = document.createElement("table"); entryTable.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9em";
+        const entryHeader = document.createElement("tr");
+        for (const label of ["词条", "已关联高亮", "手动匹配高亮"]) { const cell = document.createElement("th"); cell.textContent = label; cell.style.cssText = "text-align:left;border-bottom:1px solid #8888;padding:4px"; entryHeader.append(cell); }
+        const entryBody = document.createElement("tbody");
+        for (const row of unmatchedEntries) {
+        const tr = document.createElement("tr");
+        for (const value of [row.word, "—"]) { const cell = document.createElement("td"); cell.textContent = value; cell.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px;overflow-wrap:anywhere"; tr.append(cell); }
+        const action = document.createElement("td"); action.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px";
+        const input = document.createElement("input"); input.type = "text"; input.placeholder = "高亮文本"; input.style.width = "120px";
+        const button = document.createElement("button"); button.type = "button"; button.textContent = "手动匹配";
+        button.addEventListener("click", async () => {
+          input.disabled = true; button.disabled = true;
+          try {
+            if (!await saveConfig()) return;
+            $("syncStatus").textContent = "正在写入手动匹配…";
+            const outcome = JSON.parse(await app.syncManualEntryToHighlight(row.entryRef, input.value));
+            $("syncStatus").textContent = outcome.updated ? "已手动匹配并更新词条格式。" : "已匹配；词条已经是当前格式。";
+            renderSyncDiagnostics(JSON.parse(await app.diagnoseCurrentPDFHighlightMatches()));
+          } catch (e) { $("syncStatus").textContent = e.message; input.disabled = false; button.disabled = false; }
+        });
+          action.append(input, document.createElement("br"), button); tr.append(action); entryBody.append(tr);
+        }
+        entryTable.append(entryHeader, entryBody); container.append(entrySummary, entryTable);
+      }
     };
-    $("diagnoseHighlights").addEventListener("click", async () => {
-      $("diagnoseHighlights").disabled = true;
-      $("syncDiagnostics").textContent = "正在读取当前 PDF 和生词本…";
-      try { renderSyncDiagnostics(JSON.parse(await app.diagnoseCurrentPDFHighlightMatches())); }
-      catch (e) { $("syncDiagnostics").textContent = e.message; }
-      finally { $("diagnoseHighlights").disabled = false; }
-    });
     const setFieldVisible = (id, visible) => {
       const field = $(id);
       const controlLabel = id === "useBaiduTrial" ? field.parentElement : null;
@@ -164,7 +200,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
-    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
+    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
     for (const id of settingControls) {
       $(id).addEventListener("input", () => { dirty = true; });
       $(id).addEventListener("change", () => { dirty = true; });

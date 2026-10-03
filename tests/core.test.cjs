@@ -8,6 +8,8 @@ test('Unicode single words; reject sentences and oversized selection', () => {
   assert.equal(C.defaults.autoHighlight, true);
   assert.equal(C.defaults.openNoteAfterSave, true);
   assert.equal(C.defaults.autoLocateSavedWord, true);
+  assert.equal(C.defaults.noteLocateMode, 'select');
+  assert.equal(C.defaults.showNoteLocateStatus, false);
   assert.equal(C.defaults.highlightColor, '#c0c0c0');
   for (const word of ['apple', 'café', 'naïve', "don't", 'well-being', '中文']) assert.equal(C.wordFrom(word), word);
   assert.equal(C.wordFrom('“apple,”'), 'apple');
@@ -58,6 +60,7 @@ test('Baidu general mode accepts own credentials or local trial mode', () => {
   assert.throws(() => C.validate({ ...C.defaults, provider: 'baidu-general' }), /百度 API Key/);
   assert.throws(() => C.validate({ ...C.defaults, openNoteAfterSave: 'yes' }), /保存后打开生词本/);
   assert.throws(() => C.validate({ ...C.defaults, autoLocateSavedWord: 'yes' }), /已保存单词定位/);
+  assert.throws(() => C.validate({ ...C.defaults, showNoteLocateStatus: 'yes' }), /高亮定位提示/);
 });
 function runtime(initialConfig = base, credentials = {}) {
   let sent = 0;
@@ -126,11 +129,36 @@ test('saved-word matching accepts the query word, original selection, and legacy
   assert.equal(app.matchesSavedWord({dataset:{lexinoteWord:'go',lexinoteOriginalWord:'went'},textContent:'go'}, 'gone'), false);
   assert.equal(app.annotationIDForHeading({dataset:{lexinoteAnnotationId:'annotation-1'}}), 'annotation-1');
   assert.equal(app.highlightMatchMethod('annotation-1', 'other', '', 'annotation-1', 'missing'), 'annotation');
+  const duplicate = {dataset:{lexinoteWord:'present'},textContent:'Present'};
+  const indexed = app.indexHeadings([duplicate, {dataset:{lexinoteWord:'present'},textContent:'present'}]);
+  assert.equal(indexed.byWord.present.length, 2);
+  assert.equal(app.isWordHeading({textContent:'Present',querySelector:()=>null}), true);
+  assert.equal(app.isWordHeading({textContent:'Present',querySelector:()=>({})}), false);
+  assert.equal(app.isWordHeading({textContent:'a linked heading',querySelector:()=>null}), false);
 });
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC'}), '查看位置');
+});
+test('wordbook export filename uses a safe Zotero document title', () => {
+  const {app}=runtime();
+  assert.equal(app.wordbookFilename({getField:()=> 'A/B: C?'}), 'A B C-lexinote-wordbook.json');
+  assert.equal(app.wordbookFilename({getField:()=> '   '}), '未命名文献-lexinote-wordbook.json');
+});
+test('wordbook export recognizes standalone example labels and following lines', () => {
+  const {app}=runtime();
+  const link = {href:'zotero://open-pdf/library/items/ATTACHMENT?page=2'};
+  const definition = {tagName:'P',textContent:'n. 幅度',nextElementSibling:null,querySelector:()=>null};
+  const exampleLabel = {tagName:'P',textContent:'例句',nextElementSibling:null,querySelector:()=>null};
+  const exampleOne = {tagName:'P',textContent:'They measured the magnitude.',nextElementSibling:null,querySelector:()=>null};
+  const exampleTwo = {tagName:'P',textContent:'The magnitude was large.',nextElementSibling:null,querySelector:()=>null};
+  const source = {tagName:'P',textContent:'原文词：magnitude · 第 2 页 · 2026/9/16',nextElementSibling:null,querySelector:()=>link};
+  definition.nextElementSibling=exampleLabel; exampleLabel.nextElementSibling=exampleOne; exampleOne.nextElementSibling=exampleTwo; exampleTwo.nextElementSibling=source;
+  const heading={textContent:'magnitude',dataset:{lexinoteWord:'magnitude'},nextElementSibling:definition};
+  const entry=app.exportEntry(heading,{libraryID:1,key:'NOTE'}, {key:'PARENT',getField:()=> 'Paper'}, 0);
+  assert.deepEqual(JSON.parse(JSON.stringify(entry.meanings)), ['n. 幅度']);
+  assert.equal(entry.example, 'They measured the magnitude.\nThe magnitude was large.');
 });
 test('current-format highlights only include configured single-word annotations', async () => {
   const {app}=runtime();

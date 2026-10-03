@@ -544,6 +544,12 @@ var LexiNoteRuntime = class {
       || heading.dataset.lexinoteOriginalWord === normalizedWord
       || LexiNoteCore.normalize(heading.textContent.trim()) === normalizedWord;
   }
+  isWordHeading(heading) {
+    return Boolean(heading) && !heading.querySelector?.("a[href]") && Boolean(LexiNoteCore.wordFrom(heading.textContent));
+  }
+  wordHeadings(root) {
+    return [...root.querySelectorAll("h3")].filter(heading => this.isWordHeading(heading));
+  }
   annotationIDForHeading(heading) {
     if (heading.dataset.lexinoteAnnotationId) return heading.dataset.lexinoteAnnotationId;
     try {
@@ -568,9 +574,9 @@ var LexiNoteRuntime = class {
     const byAnnotationID = Object.create(null), byWord = Object.create(null);
     for (const heading of headings) {
       const entry = this.headingMatchData(heading);
-      if (entry.annotationID) byAnnotationID[entry.annotationID] = heading;
-      if (entry.normalizedWord) byWord[entry.normalizedWord] = heading;
-      if (entry.normalizedOriginalWord) byWord[entry.normalizedOriginalWord] = heading;
+      if (entry.annotationID) (byAnnotationID[entry.annotationID] ||= []).push(heading);
+      if (entry.normalizedWord) (byWord[entry.normalizedWord] ||= []).push(heading);
+      if (entry.normalizedOriginalWord) (byWord[entry.normalizedOriginalWord] ||= []).push(heading);
     }
     return { byAnnotationID, byWord };
   }
@@ -594,6 +600,103 @@ var LexiNoteRuntime = class {
       + (Number.isInteger(pageIndex) ? "?page=" + (pageIndex + 1) : "");
     link.textContent = pageLabel ? "第 " + pageLabel + " 页" : "查看位置";
     return link;
+  }
+  exportEntry(heading, note, parent, ordinal) {
+    const sourceLine = this.entrySourceLine(heading);
+    const sourceLink = sourceLine?.querySelector?.('a[href^="zotero://open-pdf/"]');
+    let attachmentKey = "", pageLabel = "", sourceURL = "";
+    try {
+      sourceURL = sourceLink?.href || "";
+      const parsed = new URL(sourceURL);
+      attachmentKey = parsed.pathname.match(/\/items\/([^/]+)/)?.[1] || "";
+      pageLabel = parsed.searchParams.get("page") || "";
+    } catch (_) {}
+    const paragraphs = [];
+    for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
+      if (element !== sourceLine && element.tagName === "P") paragraphs.push(String(element.textContent || "").trim());
+    }
+    const phoneticIndex = paragraphs.findIndex(text => /^\/.+\/$/.test(text));
+    const phonetic = phoneticIndex >= 0 ? paragraphs.splice(phoneticIndex, 1)[0] : "";
+    // Notes created by different dictionary responses may use either
+    // “例句：内容” or a standalone “例句” paragraph followed by one or more
+    // example paragraphs. Both forms are part of the exported example field.
+    const exampleIndex = paragraphs.findIndex(text => /^例句[：:]?/.test(text));
+    let example = "";
+    if (exampleIndex >= 0) {
+      const firstLine = paragraphs[exampleIndex].replace(/^例句[：:]?\s*/, "");
+      example = [firstLine, ...paragraphs.slice(exampleIndex + 1)].filter(Boolean).join("\n");
+      paragraphs.splice(exampleIndex);
+    }
+    const sourceText = String(sourceLine?.textContent || "");
+    const originalWord = sourceText.match(/^原文词：(.+?) · /)?.[1] || "";
+    const savedDate = sourceText.match(/ · ([^·]+)$/)?.[1]?.trim() || "";
+    const word = String(heading.textContent || "").trim();
+    return {
+      id: `lexinote:${note.libraryID}:${note.key}:${ordinal}`,
+      word,
+      normalizedWord: heading.dataset.lexinoteWord || LexiNoteCore.normalize(word),
+      originalWord,
+      phonetic,
+      meanings: paragraphs.filter(Boolean),
+      example,
+      source: {
+        zoteroItemKey: parent?.key || "",
+        title: parent?.getField?.("title") || "",
+        attachmentKey,
+        pageLabel,
+        url: sourceURL
+      },
+      createdAt: heading.dataset.lexinoteCreatedAt || null,
+      savedDate: savedDate || null,
+      review: { status: "new", repetitions: 0, ease: 2.5, nextReviewAt: null },
+      tags: []
+    };
+  }
+  async exportParentItem() {
+    const reader = this.currentPDFReader();
+    const activeItem = reader?.itemID ? await Zotero.Items.getAsync(reader.itemID) : Zotero.getActiveZoteroPane?.().getSelectedItems?.()[0];
+    if (!activeItem || activeItem.deleted) throw new Error("请先打开或选中要导出生词本的 Zotero 文献。");
+    if (activeItem.isRegularItem?.()) return activeItem;
+    const parentID = activeItem.parentID;
+    if (!parentID) throw new Error("当前项目没有所属文献，无法导出生词本。");
+    const parent = await Zotero.Items.getAsync(parentID);
+    if (!parent || parent.deleted || !parent.isRegularItem?.()) throw new Error("找不到当前项目所属的文献。");
+    return parent;
+  }
+  wordbookFilename(parent) {
+    const title = String(parent?.getField?.("title") || "未命名文献")
+      .replace(/[\\/:*?"<>|\u0000-\u001F]/g, " ").replace(/\s+/g, " ").trim().replace(/[. ]+$/g, "").slice(0, 120);
+    return `${title || "未命名文献"}-lexinote-wordbook.json`;
+  }
+  async exportWordbook(parent) {
+    const entries = [];
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag?.(this.tag)) continue;
+      const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      this.wordHeadings(root).forEach((heading, ordinal) => entries.push(this.exportEntry(heading, note, parent, ordinal)));
+    }
+    return {
+      format: "lexinote-wordbook",
+      schemaVersion: 1,
+      exportedAt: new Date().toISOString(),
+      language: { source: "en", target: this.config.target || "zh-CN" },
+      entries
+    };
+  }
+  async exportWordbookToFile(window) {
+    if (typeof LexiNoteFilePicker !== "function") throw new Error("导出组件尚未初始化；请重启 Zotero 后重试。");
+    const parent = await this.exportParentItem();
+    const picker = new LexiNoteFilePicker();
+    picker.init(window, "导出 LexiNote 生词本", picker.modeSave);
+    picker.appendFilter("LexiNote 生词本 JSON", "*.json");
+    picker.defaultString = this.wordbookFilename(parent);
+    const result = await picker.show();
+    if (![picker.returnOK, picker.returnReplace].includes(result)) throw new Error("已取消导出。");
+    const wordbook = await this.exportWordbook(parent);
+    await Zotero.File.putContentsAsync(picker.file, JSON.stringify(wordbook, null, 2) + "\n");
+    return { entries: wordbook.entries.length, path: picker.file.path };
   }
   updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex, annotationID = "", replaceOriginalWord = false) {
     const before = document.body.innerHTML;
@@ -677,13 +780,18 @@ var LexiNoteRuntime = class {
       const document = parser.parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
       const before = document.body.innerHTML;
-      const index = this.indexHeadings(root.querySelectorAll("h3"));
+      const index = this.indexHeadings(this.wordHeadings(root));
       for (const highlight of highlights) {
         if (!highlight.normalizedWord) continue;
-        const heading = index.byAnnotationID[highlight.id] || index.byWord[highlight.normalizedWord];
-        if (!heading) continue;
-        matched++;
-        this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+        const headings = [...new Set([
+          ...(index.byAnnotationID[highlight.id] || []),
+          ...(index.byWord[highlight.normalizedWord] || [])
+        ])];
+        if (!headings.length) continue;
+        matched += headings.length;
+        for (const heading of headings) {
+          this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+        }
       }
       if (document.body.innerHTML !== before) {
         note.setNote(document.body.innerHTML);
@@ -712,11 +820,13 @@ var LexiNoteRuntime = class {
       if (!note.isEditable?.()) throw new Error("生词本笔记不可编辑，无法更新格式。");
       const document = parser.parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
-      const heading = [...root.querySelectorAll("h3")].find(item => this.matchesSavedWord(item, normalizedEntryWord));
-      if (!heading) continue;
-      matched++;
+      const headings = this.wordHeadings(root).filter(item => this.matchesSavedWord(item, normalizedEntryWord));
+      if (!headings.length) continue;
+      matched += headings.length;
       const before = document.body.innerHTML;
-      this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+      for (const heading of headings) {
+        this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+      }
       if (document.body.innerHTML !== before) {
         note.setNote(document.body.innerHTML);
         await note.saveTx();
@@ -724,6 +834,29 @@ var LexiNoteRuntime = class {
       }
     }
     return JSON.stringify({ matched, updated });
+  }
+  async syncManualEntryToHighlight(entryRef, highlightText) {
+    const reader = this.currentPDFReader();
+    if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
+    const [noteIDText, headingIndexText] = String(entryRef || "").split(":");
+    const noteID = Number(noteIDText), headingIndex = Number(headingIndexText);
+    if (!Number.isInteger(noteID) || !Number.isInteger(headingIndex) || headingIndex < 0) throw new Error("词条标识已失效；请重新打开匹配诊断后再试。");
+    const attachment = await Zotero.Items.getAsync(reader.itemID);
+    if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+    const normalizedHighlightWord = LexiNoteCore.normalize(LexiNoteCore.wordFrom(highlightText));
+    if (!normalizedHighlightWord) throw new Error("请输入单个高亮文本。");
+    const highlight = (await this.currentFormatHighlights(attachment)).find(item => item.normalizedWord === normalizedHighlightWord);
+    if (!highlight) throw new Error("未找到文本匹配的当前格式高亮；请检查高亮文本、样式和颜色。");
+    const note = await Zotero.Items.getAsync(noteID);
+    if (!note || note.deleted || !note.hasTag(this.tag) || !note.isEditable?.()) throw new Error("该生词本词条已不可编辑；请重新打开匹配诊断后再试。");
+    const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+    const root = document.body.querySelector("div[data-schema-version]") || document.body;
+    const heading = [...root.querySelectorAll("h3")][headingIndex];
+    if (!this.isWordHeading(heading)) throw new Error("词条位置已变化；请重新打开匹配诊断后再试。");
+    const before = document.body.innerHTML;
+    this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
+    if (document.body.innerHTML !== before) { note.setNote(document.body.innerHTML); await note.saveTx(); }
+    return JSON.stringify({ matched: 1, updated: document.body.innerHTML !== before });
   }
   async diagnoseCurrentPDFHighlightMatches() {
     let stage = "读取当前 PDF";
@@ -747,33 +880,49 @@ var LexiNoteRuntime = class {
         stage = "解析生词本词条";
         const document = parser.parseFromString(note.getNote(), "text/html");
         const root = document.body.querySelector("div[data-schema-version]") || document.body;
-        for (const heading of root.querySelectorAll("h3")) {
-          entries.push({ ...this.headingMatchData(heading), noteID: note.id });
-        }
+        [...root.querySelectorAll("h3")].forEach((heading, headingIndex) => {
+          if (!this.isWordHeading(heading)) return;
+          entries.push({ ...this.headingMatchData(heading), noteID: note.id, headingIndex, entryRef: `${note.id}:${headingIndex}` });
+        });
       }
       stage = "匹配高亮与词条";
       const byAnnotationID = Object.create(null), byWord = Object.create(null);
       for (const entry of entries) {
-        if (entry.annotationID) byAnnotationID[entry.annotationID] = entry;
-        if (entry.normalizedWord) byWord[entry.normalizedWord] = entry;
-        if (entry.normalizedOriginalWord) byWord[entry.normalizedOriginalWord] = entry;
+        if (entry.annotationID) (byAnnotationID[entry.annotationID] ||= []).push(entry);
+        if (entry.normalizedWord) (byWord[entry.normalizedWord] ||= []).push(entry);
+        if (entry.normalizedOriginalWord) (byWord[entry.normalizedOriginalWord] ||= []).push(entry);
       }
       const rows = [];
       for (const highlight of highlights) {
-        const entry = byAnnotationID[highlight.id] || byWord[highlight.normalizedWord] || null;
-        const method = entry ? (entry.annotationID === highlight.id ? "annotation" : "word") : "";
+        const matchedEntries = [...new Set([
+          ...(byAnnotationID[highlight.id] || []),
+          ...(byWord[highlight.normalizedWord] || [])
+        ])];
+        const method = matchedEntries.length ? (matchedEntries.some(entry => entry.annotationID === highlight.id) ? "annotation" : "word") : "";
         rows.push({
           id: highlight.id,
           word: highlight.word,
           pageLabel: highlight.pageLabel,
           method,
-          entryWord: entry?.word || "",
-          entryAnnotationID: entry?.annotationID || ""
+          entryWords: matchedEntries.map(entry => entry.word),
+          entryAnnotationIDs: matchedEntries.map(entry => entry.annotationID || "")
         });
       }
+      const entryRows = entries.map(entry => {
+        const matchedHighlights = highlights.filter(highlight => this.highlightMatchMethod(
+          entry.annotationID, entry.normalizedWord, entry.normalizedOriginalWord, highlight.id, highlight.normalizedWord));
+        return {
+          entryRef: entry.entryRef, word: entry.word, annotationID: entry.annotationID,
+          highlightIDs: matchedHighlights.map(highlight => highlight.id),
+          highlightWords: matchedHighlights.map(highlight => highlight.word)
+        };
+      });
       // Preferences runs in a less-privileged document. Return serialized data
       // so Gecko never needs to marshal an array across the privilege boundary.
-      return JSON.stringify({ scanned: highlights.length, entries: entries.length, matched: rows.filter(row => row.method).length, rows });
+      return JSON.stringify({ scanned: highlights.length, entries: entries.length,
+        matched: rows.filter(row => row.method).length,
+        matchedEntries: entryRows.filter(row => row.highlightIDs.length).length,
+        rows, entryRows });
     } catch (error) {
       return JSON.stringify({ error: String(error?.message || error), stage, stack: String(error?.stack || "") });
     }
@@ -790,7 +939,7 @@ var LexiNoteRuntime = class {
       if (note.deleted || !note.hasTag(this.tag)) continue;
       const document = parser.parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
-      const heading = [...root.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalizedWord));
+      const heading = this.wordHeadings(root).find(h => this.matchesSavedWord(h, normalizedWord));
       if (heading) return { noteID: note.id, normalizedWord };
     }
     return null;
@@ -819,7 +968,7 @@ var LexiNoteRuntime = class {
       if (!scrollContainer) return false;
       this.attachNoteLocator(document, note);
       if (normalizedWord) {
-        const heading = [...document.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalizedWord));
+        const heading = this.wordHeadings(document).find(h => this.matchesSavedWord(h, normalizedWord));
         if (heading) { heading.scrollIntoView({ block: "center" }); return true; }
       }
       scrollContainer.scrollTop = scrollContainer.scrollHeight;
@@ -834,7 +983,7 @@ var LexiNoteRuntime = class {
     if (!note?.isEditable?.()) return;
     const document = new DOMParser().parseFromString(note.getNote(), "text/html");
     const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
-    const heading = [...document.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
+    const heading = this.wordHeadings(document).find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
     if (!heading) return;
     heading.dataset.lexinoteAnnotationId = annotationID;
     heading.dataset.lexinoteAttachmentId = String(attachmentID);
@@ -857,7 +1006,7 @@ var LexiNoteRuntime = class {
     if (!note) return "";
     const document = new DOMParser().parseFromString(note.getNote(), "text/html");
     const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
-    const heading = [...document.querySelectorAll("h3")].find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
+    const heading = this.wordHeadings(document).find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
     const source = heading && this.entrySourceLine(heading)?.querySelector?.('a[href^="zotero://open-pdf/"]');
     try { return new URL(source?.href || "").searchParams.get("annotation") || ""; }
     catch (_) { return heading?.dataset.lexinoteAnnotationId || ""; }
@@ -950,6 +1099,11 @@ var LexiNoteRuntime = class {
   showNoteLocateStatus(document, text, error = false) {
     try {
       let status = document.getElementById("lexinote-locate-status");
+      if (!this.config.showNoteLocateStatus) {
+        if (status?._lexinoteDismissTimer) clearTimeout(status._lexinoteDismissTimer);
+        status?.remove();
+        return;
+      }
       if (!status) {
         status = document.createElement("div"); status.id = "lexinote-locate-status";
         status.style.cssText = "position:fixed;right:12px;bottom:12px;z-index:2147483647;max-width:340px;padding:6px 9px;border:1px solid #8888;border-radius:5px;background:Canvas;color:CanvasText;font:12px/1.4 system-ui;box-shadow:0 2px 8px #0003;pointer-events:none;";
@@ -957,6 +1111,8 @@ var LexiNoteRuntime = class {
       }
       status.textContent = "LexiNote：" + text;
       status.style.borderColor = error ? "#c44" : "#8888";
+      clearTimeout(status._lexinoteDismissTimer);
+      status._lexinoteDismissTimer = setTimeout(() => status.remove(), 3000);
     } catch (_) {}
   }
   attachOpenNoteLocators() {
@@ -998,7 +1154,7 @@ var LexiNoteRuntime = class {
     for (const candidate of notebooks) {
       const candidateDocument = parser.parseFromString(candidate.getNote(), "text/html");
       const candidateRoot = candidateDocument.body.querySelector("div[data-schema-version]") || candidateDocument.body;
-      const duplicate = [...candidateRoot.querySelectorAll("h3")].find(h =>
+      const duplicate = this.wordHeadings(candidateRoot).find(h =>
         this.matchesSavedWord(h, normalizedWord) || this.matchesSavedWord(h, normalizedOriginalWord)
       );
       if (duplicate) {
@@ -1021,13 +1177,14 @@ var LexiNoteRuntime = class {
     }
     const document = parser.parseFromString(fresh ? '<div data-schema-version="9"><h1>生词本 · LexiNote</h1></div>' : note.getNote(), "text/html");
     const root = document.body.querySelector("div[data-schema-version]") || document.body;
-    if ([...root.querySelectorAll("h3")].some(h => h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord)) {
+    if (this.wordHeadings(root).some(h => h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord)) {
       return { noteID: note.id, duplicate: true };
     }
     const add = (tag, text) => { const el = document.createElement(tag); el.textContent = text; root.append(el); return el; };
     const wordHeading = add("h3", word);
     wordHeading.dataset.lexinoteWord = normalizedWord;
     wordHeading.dataset.lexinoteOriginalWord = normalizedOriginalWord;
+    wordHeading.dataset.lexinoteCreatedAt = new Date().toISOString();
     if (result.phonetic) add("p", result.phonetic);
     for (const line of result.meaning.split("\n")) if (line) add("p", line);
     if (result.example) add("p", "例句：" + result.example);
