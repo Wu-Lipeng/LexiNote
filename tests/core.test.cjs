@@ -146,7 +146,7 @@ test('wordbook export filename uses a safe Zotero document title', () => {
   assert.equal(app.wordbookFilename({getField:()=> 'A/B: C?'}), 'A B C-lexinote-wordbook.json');
   assert.equal(app.wordbookFilename({getField:()=> '   '}), '未命名文献-lexinote-wordbook.json');
 });
-test('wordbook export recognizes standalone example labels and following lines', () => {
+test('wordbook export recognizes standalone example labels and following lines', async () => {
   const {app}=runtime();
   const link = {href:'zotero://open-pdf/library/items/ATTACHMENT?page=2'};
   const definition = {tagName:'P',textContent:'n. 幅度',nextElementSibling:null,querySelector:()=>null};
@@ -156,9 +156,27 @@ test('wordbook export recognizes standalone example labels and following lines',
   const source = {tagName:'P',textContent:'原文词：magnitude · 第 2 页 · 2026/9/16',nextElementSibling:null,querySelector:()=>link};
   definition.nextElementSibling=exampleLabel; exampleLabel.nextElementSibling=exampleOne; exampleOne.nextElementSibling=exampleTwo; exampleTwo.nextElementSibling=source;
   const heading={textContent:'magnitude',dataset:{lexinoteWord:'magnitude'},nextElementSibling:definition};
-  const entry=app.exportEntry(heading,{libraryID:1,key:'NOTE'}, {key:'PARENT',getField:()=> 'Paper'}, 0);
+  const entry=await app.exportEntry(heading,{libraryID:1,key:'NOTE'}, {key:'PARENT',getField:()=> 'Paper'}, 0);
   assert.deepEqual(JSON.parse(JSON.stringify(entry.meanings)), ['n. 幅度']);
   assert.equal(entry.example, 'They measured the magnitude.\nThe magnitude was large.');
+  assert.equal(Object.hasOwn(entry, 'sourceSentence'), false);
+});
+test('wordbook source sentence uses an unambiguous term on its indexed PDF page', () => {
+  const {app}=runtime();
+  const pages = 'Front matter\fThe magnitude of the result was significant. Another sentence.';
+  assert.equal(app.sourceSentenceFromText(pages, 'magnitude', '2'), 'The magnitude of the result was significant.');
+  assert.equal(app.sourceSentenceFromText('The word appears twice: word and word.', 'word', '1'), null);
+  assert.equal(app.sourceSentenceFromText('No matching term here.', 'word', '1'), null);
+});
+test('wordbook source sentence anchors repeated words to the highlight rectangle', () => {
+  const {app}=runtime();
+  const items = [
+    {str:'The',transform:[1,0,0,8,0,8],width:12,height:8},
+    {str:'wavelet',transform:[1,0,0,8,20,8],width:24,height:8},
+    {str:'is useful.',transform:[1,0,0,8,50,8],width:28,height:8},
+    {str:'Another wavelet appears.',transform:[1,0,0,8,0,30],width:80,height:8}
+  ];
+  assert.equal(app.sourceSentenceFromPageItems(items, [[18, 2, 46, 18]], 'wavelet'), 'The wavelet is useful.');
 });
 test('current-format highlights only include configured single-word annotations', async () => {
   const {app}=runtime();

@@ -13,6 +13,7 @@ var LexiNoteRuntime = class {
     this.byReader = new WeakMap();
     this.noteQueue = Promise.resolve();
     this.noteLocatorDocuments = new Map();
+    this.exportTextCache = new Map();
     this.alive = true;
     this.handler = event => this.selection(event);
     this.config = this.readConfig();
@@ -592,6 +593,159 @@ var LexiNoteRuntime = class {
       return page && /^\d+$/.test(page) ? "第 " + page + " 页" : "查看位置";
     } catch (_) { return "查看位置"; }
   }
+  sentenceAtTextOffset(text, index) {
+    const value = String(text || "");
+    if (!value || !Number.isInteger(index) || index < 0 || index >= value.length) return null;
+    const before = value.slice(0, index);
+    const start = Math.max(before.lastIndexOf("."), before.lastIndexOf("!"), before.lastIndexOf("?"), before.lastIndexOf("\n")) + 1;
+    const after = value.slice(index);
+    const endMatch = after.match(/[.!?](?=\s|$)/);
+    const rawSentence = value.slice(start, endMatch ? index + endMatch.index + 1 : value.indexOf("\n", index) >= 0 ? value.indexOf("\n", index) : value.length);
+    const sentence = rawSentence.replace(/\s+/g, " ").trim();
+    return sentence && sentence.length <= 1200 ? sentence : null;
+  }
+  sourceSentenceFromPageItems(items, rects, originalWord) {
+    const word = LexiNoteCore.normalize(originalWord);
+    if (!word || !Array.isArray(items) || !Array.isArray(rects) || !rects.length) return null;
+    const parts = [], offsets = [];
+    for (const item of items) {
+      const text = String(item?.str || "");
+      if (!text) continue;
+      offsets.push(parts.join(" ").length + (parts.length ? 1 : 0));
+      parts.push(text);
+    }
+    const text = parts.join(" ");
+    const matches = [];
+    for (let index = 0; index < parts.length; index++) {
+      if (!LexiNoteCore.normalize(parts[index]).includes(word)) continue;
+      const item = items.filter(item => String(item?.str || ""))[index];
+      const x = Number(item.transform?.[4]), y = Number(item.transform?.[5]);
+      const width = Math.abs(Number(item.width || 0)), height = Math.abs(Number(item.height || item.transform?.[3] || 0));
+      if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+      const hit = rects.some(rect => {
+        if (!Array.isArray(rect) || rect.length < 4) return false;
+        const left = Math.min(Number(rect[0]), Number(rect[2])) - 2, right = Math.max(Number(rect[0]), Number(rect[2])) + 2;
+        const bottom = Math.min(Number(rect[1]), Number(rect[3])) - 4, top = Math.max(Number(rect[1]), Number(rect[3])) + 4;
+        return x + width >= left && x <= right && y >= bottom && y <= top;
+      });
+      if (hit) matches.push(offsets[index]);
+    }
+    return matches.length === 1 ? this.sentenceAtTextOffset(text, matches[0]) : null;
+  }
+  sourceSentenceFromText(text, originalWord, pageLabel) {
+    const fullText = String(text || "");
+    const word = String(originalWord || "").trim();
+    if (!fullText || !word) return null;
+    const page = Number(pageLabel);
+    const pages = fullText.split("\f");
+    const candidates = Number.isInteger(page) && page > 0 && pages.length >= page ? pages[page - 1] : fullText;
+    const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const matchPattern = new RegExp(`(^|[^\\p{L}\\p{M}])(${escaped})(?=$|[^\\p{L}\\p{M}])`, "giu");
+    const matches = [];
+    for (const match of candidates.matchAll(matchPattern)) matches.push(match.index + match[1].length);
+    // Without character coordinates, a repeated term cannot be linked to a
+    // particular annotation reliably. Prefer a missing context to a wrong one.
+    if (matches.length !== 1) return null;
+    const index = matches[0];
+    return this.sentenceAtTextOffset(candidates, index);
+  }
+  entrySourceReference(heading) {
+    const sourceLine = this.entrySourceLine(heading);
+    const sourceLink = sourceLine?.querySelector?.('a[href^="zotero://open-pdf/"]');
+    let attachmentKey = "", pageLabel = "", annotationID = "", sourceURL = "";
+    try {
+      sourceURL = sourceLink?.href || "";
+      const parsed = new URL(sourceURL);
+      attachmentKey = parsed.pathname.match(/\/items\/([^/]+)/)?.[1] || "";
+      pageLabel = parsed.searchParams.get("page") || "";
+      annotationID = parsed.searchParams.get("annotation") || "";
+    } catch (_) {}
+    const sourceText = String(sourceLine?.textContent || "");
+    return { sourceLine, attachmentKey, pageLabel, annotationID, sourceURL, originalWord: sourceText.match(/^原文词：(.+?) · /)?.[1] || "" };
+  }
+  async sourceSentenceDiagnosticFromAnnotation(reader, annotation, originalWord) {
+    if (!reader) return { status: "reader-not-found", sentence: null };
+    if (!annotation) return { status: "annotation-not-found", sentence: null };
+    try {
+      const position = typeof annotation.annotationPosition === "string" ? JSON.parse(annotation.annotationPosition) : annotation.annotationPosition;
+      if (!position?.rects?.length || !Number.isInteger(position.pageIndex)) return { status: "annotation-position-missing", sentence: null };
+      const view = reader?._internalReader?._primaryView || reader?._internalReader?._lastView
+        || this.readerInternal(reader)?._primaryView || this.readerInternal(reader)?._lastView;
+      let readerWindow = this.readerFrame(reader) || view?._iframeWindow;
+      if (readerWindow && typeof Components !== "undefined") readerWindow = Components.utils.waiveXrays(readerWindow);
+      const application = readerWindow?.wrappedJSObject?.PDFViewerApplication || readerWindow?.PDFViewerApplication;
+      const pdfViewer = application?.pdfViewer;
+      const pdfDocument = application?.pdfDocument || pdfViewer?.pdfDocument;
+      if (!pdfDocument) return { status: "pdf-text-layer-unavailable", sentence: null, pageLabel: String(position.pageIndex + 1) };
+      const pageView = pdfViewer?.getPageView?.(position.pageIndex);
+      const pdfPage = pageView?.pdfPage || (typeof pdfDocument.getPage === "function" ? await pdfDocument.getPage(position.pageIndex + 1) : null);
+      if (typeof pdfPage?.getTextContent !== "function") return { status: "pdf-page-text-unavailable", sentence: null, pageLabel: String(position.pageIndex + 1) };
+      const textContent = await pdfPage.getTextContent();
+      const sentence = this.sourceSentenceFromPageItems(textContent.items, position.rects, originalWord);
+      return { status: sentence ? "matched" : "rectangle-text-mismatch", sentence, pageLabel: String(position.pageIndex + 1), textItems: textContent.items.length };
+    } catch (error) { return { status: "pdf-read-failed", sentence: null, error: String(error?.message || error) }; }
+  }
+  async sourceSentenceFromAnnotation(reader, annotation, originalWord) {
+    return (await this.sourceSentenceDiagnosticFromAnnotation(reader, annotation, originalWord)).sentence;
+  }
+  async exportSourceContext() {
+    const reader = this.currentPDFReader();
+    if (!reader?.itemID) return null;
+    try {
+      const attachment = await Zotero.Items.getAsync(reader.itemID);
+      const annotations = new Map((attachment?.getAnnotations?.() || []).map(item => [String(item.key || item.id || ""), item]));
+      return attachment ? { reader, attachment, annotations } : null;
+    } catch (_) { return null; }
+  }
+  async sourceSentenceForEntry(context, libraryID, attachmentKey, annotationID, originalWord, pageLabel) {
+    if (!attachmentKey || !originalWord) return null;
+    if (annotationID) {
+      if (!context || String(context.attachment.key || "") !== attachmentKey) return null;
+      return this.sourceSentenceFromAnnotation(context.reader, context.annotations.get(annotationID), originalWord);
+    }
+    const cacheKey = `${libraryID}:${attachmentKey}`;
+    let textPromise = this.exportTextCache.get(cacheKey);
+    if (!textPromise) {
+      textPromise = (async () => {
+        try {
+          const attachment = await (Zotero.Items.getByLibraryAndKeyAsync?.(libraryID, attachmentKey)
+            || Zotero.Items.getByLibraryAndKey?.(libraryID, attachmentKey));
+          return attachment || null;
+        } catch (_) { return ""; }
+      })();
+      this.exportTextCache.set(cacheKey, textPromise);
+    }
+    const attachment = await textPromise;
+    if (!attachment) return null;
+    try { return this.sourceSentenceFromText(await attachment.attachmentText, originalWord, pageLabel); }
+    catch (_) { return null; }
+  }
+  async diagnoseSourceSentenceMatches() {
+    const parent = await this.exportParentItem();
+    const context = await this.exportSourceContext();
+    const labels = {
+      "matched": "已匹配", "reader-not-found": "未找到当前 PDF 阅读器", "annotation-not-found": "未找到对应高亮",
+      "annotation-position-missing": "高亮缺少位置", "pdf-text-layer-unavailable": "PDF 文本层未就绪", "pdf-page-text-unavailable": "PDF 页面文本未就绪",
+      "rectangle-text-mismatch": "高亮矩形未命中文本", "pdf-read-failed": "读取 PDF 文本层失败",
+      "missing-annotation-id": "词条没有高亮 ID", "source-attachment-not-open": "词条来源不是当前打开的 PDF"
+    };
+    const rows = [];
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag?.(this.tag)) continue;
+      const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      for (const heading of this.wordHeadings(root)) {
+        const source = this.entrySourceReference(heading);
+        let result;
+        if (!source.annotationID) result = { status: "missing-annotation-id", sentence: null, pageLabel: source.pageLabel };
+        else if (!context || String(context.attachment.key || "") !== source.attachmentKey) result = { status: "source-attachment-not-open", sentence: null, pageLabel: source.pageLabel };
+        else result = await this.sourceSentenceDiagnosticFromAnnotation(context.reader, context.annotations.get(source.annotationID), source.originalWord || heading.textContent);
+        rows.push({ word: String(heading.textContent || "").trim(), annotationID: source.annotationID, pageLabel: result.pageLabel || source.pageLabel, sentence: result.sentence, status: result.status, statusLabel: (labels[result.status] || result.status) + (result.error ? `：${result.error}` : "") });
+      }
+    }
+    return JSON.stringify({ matched: rows.filter(row => row.status === "matched").length, rows });
+  }
   createSourceLink(document, attachment, pageLabel, pageIndex) {
     const link = document.createElement("a");
     const library = Zotero.Libraries.get(attachment.libraryID);
@@ -601,16 +755,8 @@ var LexiNoteRuntime = class {
     link.textContent = pageLabel ? "第 " + pageLabel + " 页" : "查看位置";
     return link;
   }
-  exportEntry(heading, note, parent, ordinal) {
-    const sourceLine = this.entrySourceLine(heading);
-    const sourceLink = sourceLine?.querySelector?.('a[href^="zotero://open-pdf/"]');
-    let attachmentKey = "", pageLabel = "", sourceURL = "";
-    try {
-      sourceURL = sourceLink?.href || "";
-      const parsed = new URL(sourceURL);
-      attachmentKey = parsed.pathname.match(/\/items\/([^/]+)/)?.[1] || "";
-      pageLabel = parsed.searchParams.get("page") || "";
-    } catch (_) {}
+  async exportEntry(heading, note, parent, ordinal) {
+    const { sourceLine, attachmentKey, pageLabel, annotationID, sourceURL, originalWord: savedOriginalWord } = this.entrySourceReference(heading);
     const paragraphs = [];
     for (let element = heading.nextElementSibling; element && element.tagName !== "H3"; element = element.nextElementSibling) {
       if (element !== sourceLine && element.tagName === "P") paragraphs.push(String(element.textContent || "").trim());
@@ -628,7 +774,7 @@ var LexiNoteRuntime = class {
       paragraphs.splice(exampleIndex);
     }
     const sourceText = String(sourceLine?.textContent || "");
-    const originalWord = sourceText.match(/^原文词：(.+?) · /)?.[1] || "";
+    const originalWord = savedOriginalWord;
     const savedDate = sourceText.match(/ · ([^·]+)$/)?.[1]?.trim() || "";
     const word = String(heading.textContent || "").trim();
     return {
@@ -675,7 +821,10 @@ var LexiNoteRuntime = class {
       if (note.deleted || !note.hasTag?.(this.tag)) continue;
       const document = new DOMParser().parseFromString(note.getNote(), "text/html");
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
-      this.wordHeadings(root).forEach((heading, ordinal) => entries.push(this.exportEntry(heading, note, parent, ordinal)));
+      const headings = this.wordHeadings(root);
+      for (let ordinal = 0; ordinal < headings.length; ordinal++) {
+        entries.push(await this.exportEntry(headings[ordinal], note, parent, ordinal));
+      }
     }
     return {
       format: "lexinote-wordbook",

@@ -107,6 +107,28 @@ var LexiNotePreferences = window.LexiNotePreferences = {
         $("exportWordbook").disabled = false;
       }
     });
+    $("diagnoseSourceSentences").addEventListener("click", async () => {
+      $("diagnoseSourceSentences").disabled = true;
+      $("sourceSentenceDiagnostics").textContent = "正在读取当前 PDF 的高亮与文本层…";
+      try { renderSourceSentenceDiagnostics(JSON.parse(await app.diagnoseSourceSentenceMatches())); }
+      catch (e) { $("sourceSentenceDiagnostics").textContent = e.message || "原文句子匹配诊断失败。"; }
+      finally { $("diagnoseSourceSentences").disabled = false; }
+    });
+    const renderSourceSentenceDiagnostics = result => {
+      const container = $("sourceSentenceDiagnostics"); container.replaceChildren();
+      const summary = document.createElement("p");
+      summary.textContent = `原文句子匹配：${result.matched} / ${result.rows.length} 条成功。`;
+      const table = document.createElement("table"); table.style.cssText = "width:100%;border-collapse:collapse;font-size:0.9em";
+      const header = document.createElement("tr");
+      for (const label of ["词条", "高亮 ID", "匹配阶段", "页码", "原文句子"]) { const cell = document.createElement("th"); cell.textContent = label; cell.style.cssText = "text-align:left;border-bottom:1px solid #8888;padding:4px"; header.append(cell); }
+      const body = document.createElement("tbody");
+      for (const row of result.rows) {
+        const tr = document.createElement("tr");
+        for (const value of [row.word, row.annotationID || "—", row.statusLabel, row.pageLabel || "—", row.sentence || "—"]) { const cell = document.createElement("td"); cell.textContent = value; cell.style.cssText = "vertical-align:top;border-bottom:1px solid #8884;padding:4px;overflow-wrap:anywhere"; tr.append(cell); }
+        body.append(tr);
+      }
+      table.append(header, body); container.append(summary, table);
+    };
     const renderSyncDiagnostics = result => {
       const container = $("syncDiagnostics");
       container.replaceChildren();

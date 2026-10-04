@@ -23,8 +23,10 @@
       <html:p style="margin-bottom:0"><html:button id="lexinote-restoreFeatures" type="button">恢复默认设置</html:button> <html:small>只恢复本区域设置，不影响接口配置或已保存凭据。</html:small></html:p>
       <html:p style="margin-bottom:0"><html:button id="lexinote-syncHighlights" type="button">按当前格式同步词条</html:button> <html:small>双向匹配当前 PDF 的高亮与生词词条，并将匹配词条更新为当前格式。</html:small></html:p>
       <html:p style="margin-bottom:0"><html:button id="lexinote-exportWordbook" type="button">导出生词本 JSON</html:button> <html:small>导出当前 Zotero 文献的 LexiNote 词条；默认文件名包含文献标题，供安卓记词 App 导入。</html:small></html:p>
+      <html:p style="margin-bottom:0"><html:button id="lexinote-diagnoseSourceSentences" type="button">查看原文句子匹配诊断（待开发）</html:button> <html:small>显示每个词条从高亮到 PDF 文本层的匹配结果；不会写入导出 JSON。</html:small></html:p>
       <html:p id="lexinote-syncStatus" role="status" style="margin:8px 0 0;white-space:pre-wrap;overflow-wrap:anywhere"/>
       <html:div id="lexinote-syncDiagnostics" style="margin-top:8px"/>
+      <html:div id="lexinote-sourceSentenceDiagnostics" style="margin-top:8px"/>
     </html:section>
     <html:section id="lexinote-interface-settings" style="margin:16px 0;padding:14px;border:1px solid #8885;border-radius:6px">
       <html:h2 style="margin:0 0 10px;font-size:1.15em">接口设置</html:h2>
