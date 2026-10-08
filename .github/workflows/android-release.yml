@@ -43,7 +43,9 @@ jobs:
 
       - name: Build signed release APK
         working-directory: android-app
-        run: ./gradlew assembleRelease
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease
 
       - name: Create GitHub Release
         env:
