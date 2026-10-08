@@ -55,7 +55,9 @@ jobs:
           VERSION="${TAG#android-v}"
           APK="android-app/app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK" ]; then echo "Release APK was not created." >&2; exit 1; fi
-          ARGS=("$TAG" "$APK#lexinote-${VERSION}.apk" "--title" "LexiNote Android ${VERSION}" "--generate-notes")
+          PUBLISHED_APK="android-app/app/build/outputs/apk/release/lexinote-${VERSION}.apk"
+          cp "$APK" "$PUBLISHED_APK"
+          ARGS=("$TAG" "$PUBLISHED_APK" "--title" "LexiNote Android ${VERSION}" "--generate-notes")
           if [[ "$VERSION" == *-* ]]; then ARGS+=("--prerelease"); fi
           gh release create "${ARGS[@]}"
 
