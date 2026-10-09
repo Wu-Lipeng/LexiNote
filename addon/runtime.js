@@ -1313,8 +1313,11 @@ var LexiNoteRuntime = class {
     for (const candidate of notebooks) {
       const candidateDocument = parser.parseFromString(candidate.getNote(), "text/html");
       const candidateRoot = candidateDocument.body.querySelector("div[data-schema-version]") || candidateDocument.body;
+      // A source highlight can legitimately produce several vocabulary entries:
+      // the selected text is only the lookup origin, not the entry identity.
+      // Deduplicate exclusively by the word being saved.
       const duplicate = this.wordHeadings(candidateRoot).find(h =>
-        this.matchesSavedWord(h, normalizedWord) || this.matchesSavedWord(h, normalizedOriginalWord)
+        h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
       );
       if (duplicate) {
         const formatUpdated = candidate.isEditable() && this.updateSavedWordFormat(candidateDocument, candidateRoot, duplicate,
@@ -1323,7 +1326,7 @@ var LexiNoteRuntime = class {
           candidate.setNote(candidateDocument.body.innerHTML);
           try { await candidate.saveTx(); }
           catch (_) { throw new Error("已保存的生词格式更新失败，请检查文献库权限后重试。"); }
-          await this.verifySavedWord(candidate.id, normalizedWord, normalizedOriginalWord);
+          await this.verifySavedWord(candidate.id, normalizedWord);
         }
         return { noteID: candidate.id, duplicate: true, formatUpdated };
       }
@@ -1359,10 +1362,10 @@ var LexiNoteRuntime = class {
       if (!fresh) await note.reload(["note"], true).catch(() => {});
       throw new Error("笔记保存失败，请检查文献库权限后重试。");
     }
-    await this.verifySavedWord(note.id, normalizedWord, normalizedOriginalWord);
+    await this.verifySavedWord(note.id, normalizedWord);
     return { noteID: note.id, duplicate: false };
   }
-  async verifySavedWord(noteID, normalizedWord, normalizedOriginalWord = "") {
+  async verifySavedWord(noteID, normalizedWord) {
     // A successful saveTx can leave the in-memory note editor on an older
     // revision. Reload before opening it, then verify that the entry survived
     // the write. This keeps the UI from claiming success for an invisible or
@@ -1375,7 +1378,7 @@ var LexiNoteRuntime = class {
     }
     const document = new DOMParser().parseFromString(note.getNote(), "text/html");
     const heading = [...document.querySelectorAll("h3")].find(h =>
-      this.matchesSavedWord(h, normalizedWord) || (normalizedOriginalWord && this.matchesSavedWord(h, normalizedOriginalWord))
+      h.dataset.lexinoteWord === normalizedWord || LexiNoteCore.normalize(h.textContent.trim()) === normalizedWord
     );
     if (!heading) throw new Error("生词本保存后未找到该单词，请重试。");
     return note;

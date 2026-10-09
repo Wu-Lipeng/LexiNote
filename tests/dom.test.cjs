@@ -43,6 +43,10 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       check(saved[2].duplicate,'Duplicate word detected');
       const note=store.get(saved[0].noteID);
       check(note.getNote().includes('alpha')&&note.getNote().includes('beta'),'Concurrent words preserved');
+      const sharedHighlightWord=entry('manual-query');sharedHighlightWord.originalWord='alpha';
+      const savedSharedHighlightWord=await app.saveWord(sharedHighlightWord);
+      check(!savedSharedHighlightWord.duplicate&&note.getNote().includes('manual-query'),'Different words from one highlight are saved separately');
+      check((await app.saveWord(sharedHighlightWord)).duplicate,'Same word remains a duplicate even when it shares a highlight');
       check(note.reloaded,'Saved note is reloaded and verified before it is reported as saved');
       check(note.getNote().includes('?page=3'),'Source page link preserved');
       note.setNote(note.getNote().replace('</h1>','</h1><p>Manual text</p>'));
