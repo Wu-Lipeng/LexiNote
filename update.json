@@ -3,8 +3,8 @@
     "lexinote@local.tools": {
       "updates": [
         {
-          "version": "0.2.16",
-          "update_link": "https://github.com/Wu-Lipeng/LexiNote/releases/download/v0.2.16/lexinote-0.2.16.xpi",
+          "version": "0.2.17",
+          "update_link": "https://github.com/Wu-Lipeng/LexiNote/releases/download/v0.2.17/lexinote-0.2.17.xpi",
           "applications": {
             "zotero": {
               "strict_min_version": "7.0",
