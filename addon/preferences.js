@@ -4,7 +4,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     const app = Zotero.LexiNote;
     if (!app || $("settings").dataset.initialized) return;
     $("settings").dataset.initialized = "true";
-    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType", "nutstoreServerUrl", "nutstoreFilename"];
+    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType", "nutstoreServerUrl"];
     for (const name of names) $(name).value = app.config[name];
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
@@ -118,7 +118,8 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("syncWordbook").disabled = true;
       try {
         $("status").textContent = "正在同步当前词库到坚果云…";
-        const result = await app.syncCurrentWordbookToNutstore();
+        const filename = await app.promptNutstoreFilename(window);
+        const result = await app.syncCurrentWordbookToNutstore(filename);
         $("status").textContent = `已同步 ${result.entries} 个词条到坚果云：\n${result.url}`;
       } catch (e) { $("status").textContent = e.message || "坚果云同步失败。"; }
       finally { updateNutstoreAvailability(); }

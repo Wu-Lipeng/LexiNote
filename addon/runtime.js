@@ -83,13 +83,11 @@ var LexiNoteRuntime = class {
   }
   nutstoreConfig(config = this.config) {
     const serverUrl = String(config.nutstoreServerUrl || "").trim();
-    const filename = String(config.nutstoreFilename || "").trim();
-    if (!serverUrl || !filename) return { serverUrl, filename, enabled: false };
+    if (!serverUrl) return { serverUrl, enabled: false };
     let url;
     try { url = new URL(serverUrl); } catch (_) { throw new Error("坚果云 WebDAV 地址格式不正确。"); }
     if (url.protocol !== "https:" || url.username || url.password || url.hash) throw new Error("坚果云 WebDAV 地址必须是 HTTPS，且不能包含账号、密码或 # 片段。");
-    if (!/^[^\\/\\\\\u0000-\u001F]+\.json$/i.test(filename) || filename === ".json") throw new Error("同步文件名必须是不含路径的 .json 文件名。");
-    return { serverUrl: url.href.endsWith("/") ? url.href : url.href + "/", filename, enabled: Boolean(config.nutstoreEnabled) };
+    return { serverUrl: url.href.endsWith("/") ? url.href : url.href + "/", enabled: Boolean(config.nutstoreEnabled) };
   }
   isNutstoreConfigured(config = this.config) {
     try {
@@ -98,9 +96,14 @@ var LexiNoteRuntime = class {
       return settings.enabled && Boolean(credentials.username && credentials.password);
     } catch (_) { return false; }
   }
-  nutstoreFileUrl(config = this.config) {
+  nutstoreFilename(value) {
+    const filename = String(value || "").trim();
+    if (!/^[^\\/\\\\\u0000-\u001F]+\.json$/i.test(filename) || filename === ".json") throw new Error("同步文件名必须是不含路径的 .json 文件名。");
+    return filename;
+  }
+  nutstoreFileUrl(filename, config = this.config) {
     const settings = this.nutstoreConfig(config);
-    return new URL(encodeURIComponent(settings.filename), settings.serverUrl).href;
+    return new URL(encodeURIComponent(this.nutstoreFilename(filename)), settings.serverUrl).href;
   }
   async saveConfig(input, key, nutstoreUsername, nutstorePassword) {
     const config = LexiNoteCore.validate(input, !input.enabled);
@@ -123,7 +126,6 @@ var LexiNoteRuntime = class {
       await this.setCredential(nutstoreNames.password, nutstorePassword || "");
     }
     config.nutstoreServerUrl = nutstore.serverUrl || LexiNoteCore.defaults.nutstoreServerUrl;
-    config.nutstoreFilename = nutstore.filename || LexiNoteCore.defaults.nutstoreFilename;
     // Credentials belong exclusively in Zotero's login manager, never in the
     // JSON preference that stores the rest of the add-on configuration.
     config.baiduApiKey = "";
@@ -890,13 +892,19 @@ var LexiNoteRuntime = class {
     await Zotero.File.putContentsAsync(picker.file, JSON.stringify(wordbook, null, 2) + "\n");
     return { entries: wordbook.entries.length, path: picker.file.path };
   }
-  async syncCurrentWordbookToNutstore() {
+  async promptNutstoreFilename(window) {
+    const parent = await this.exportParentItem();
+    const input = { value: this.wordbookFilename(parent) };
+    if (!Services.prompt.prompt(window, "同步当前词库到坚果云", "请输入本篇文章的同步文件名（.json）：", input, null, {})) throw new Error("已取消坚果云同步。");
+    return this.nutstoreFilename(input.value);
+  }
+  async syncCurrentWordbookToNutstore(filename) {
     if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
     const parent = await this.exportParentItem();
     const wordbook = await this.exportWordbook(parent);
     const credentials = this.nutstoreCredentials();
     const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
-    const url = this.nutstoreFileUrl();
+    const url = this.nutstoreFileUrl(filename);
     try {
       await Zotero.HTTP.request("PUT", url, {
         body: JSON.stringify(wordbook, null, 2) + "\n",
