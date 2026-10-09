@@ -7,7 +7,8 @@ var LexiNoteCore = (() => {
     body: '{"word":"{{word}}","target":"{{target}}"}',
     meaningPath: "translation", phoneticPath: "", examplePath: "",
     target: "zh-CN", delay: 350, timeout: 12000,
-    autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, noteLocateMode: "select", showNoteLocateStatus: false, highlightColor: "#c0c0c0", highlightType: "highlight"
+    autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, noteLocateMode: "select", showNoteLocateStatus: false, highlightColor: "#c0c0c0", highlightType: "highlight",
+    nutstoreEnabled: false, nutstoreServerUrl: "https://dav.jianguoyun.com/dav/", nutstoreFilename: "lexinote-wordbook.json"
   });
   function wordFrom(text) {
     const value = String(text || "").normalize("NFC").trim()

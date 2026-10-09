@@ -74,7 +74,35 @@ var LexiNoteRuntime = class {
     else if (Services.logins.addLoginAsync) await Services.logins.addLoginAsync(login);
     else Services.logins.addLogin(login);
   }
-  async saveConfig(input, key) {
+  nutstoreCredentialNames() {
+    return { username: "Nutstore WebDAV Username", password: "Nutstore WebDAV Password" };
+  }
+  nutstoreCredentials() {
+    const names = this.nutstoreCredentialNames();
+    return { username: this.getCredential(names.username), password: this.getCredential(names.password) };
+  }
+  nutstoreConfig(config = this.config) {
+    const serverUrl = String(config.nutstoreServerUrl || "").trim();
+    const filename = String(config.nutstoreFilename || "").trim();
+    if (!serverUrl || !filename) return { serverUrl, filename, enabled: false };
+    let url;
+    try { url = new URL(serverUrl); } catch (_) { throw new Error("坚果云 WebDAV 地址格式不正确。"); }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) throw new Error("坚果云 WebDAV 地址必须是 HTTPS，且不能包含账号、密码或 # 片段。");
+    if (!/^[^\\/\\\\\u0000-\u001F]+\.json$/i.test(filename) || filename === ".json") throw new Error("同步文件名必须是不含路径的 .json 文件名。");
+    return { serverUrl: url.href.endsWith("/") ? url.href : url.href + "/", filename, enabled: Boolean(config.nutstoreEnabled) };
+  }
+  isNutstoreConfigured(config = this.config) {
+    try {
+      const settings = this.nutstoreConfig(config);
+      const credentials = this.nutstoreCredentials();
+      return settings.enabled && Boolean(credentials.username && credentials.password);
+    } catch (_) { return false; }
+  }
+  nutstoreFileUrl(config = this.config) {
+    const settings = this.nutstoreConfig(config);
+    return new URL(encodeURIComponent(settings.filename), settings.serverUrl).href;
+  }
+  async saveConfig(input, key, nutstoreUsername, nutstorePassword) {
     const config = LexiNoteCore.validate(input, !input.enabled);
     // Keep newly entered Baidu credentials available for this running Zotero
     // session. The separately persisted preference below deliberately omits
@@ -88,6 +116,14 @@ var LexiNoteRuntime = class {
     } else if (!baidu) {
       await this.setKey(key);
     }
+    const nutstore = this.nutstoreConfig(config);
+    const nutstoreNames = this.nutstoreCredentialNames();
+    if (nutstoreUsername !== undefined && nutstorePassword !== undefined) {
+      await this.setCredential(nutstoreNames.username, nutstoreUsername || "");
+      await this.setCredential(nutstoreNames.password, nutstorePassword || "");
+    }
+    config.nutstoreServerUrl = nutstore.serverUrl || LexiNoteCore.defaults.nutstoreServerUrl;
+    config.nutstoreFilename = nutstore.filename || LexiNoteCore.defaults.nutstoreFilename;
     // Credentials belong exclusively in Zotero's login manager, never in the
     // JSON preference that stores the rest of the add-on configuration.
     config.baiduApiKey = "";
@@ -853,6 +889,26 @@ var LexiNoteRuntime = class {
     const wordbook = await this.exportWordbook(parent);
     await Zotero.File.putContentsAsync(picker.file, JSON.stringify(wordbook, null, 2) + "\n");
     return { entries: wordbook.entries.length, path: picker.file.path };
+  }
+  async syncCurrentWordbookToNutstore() {
+    if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
+    const parent = await this.exportParentItem();
+    const wordbook = await this.exportWordbook(parent);
+    const credentials = this.nutstoreCredentials();
+    const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
+    const url = this.nutstoreFileUrl();
+    try {
+      await Zotero.HTTP.request("PUT", url, {
+        body: JSON.stringify(wordbook, null, 2) + "\n",
+        headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json; charset=utf-8" },
+        timeout: 30000
+      });
+    } catch (error) {
+      const status = error?.status || error?.xmlhttp?.status;
+      if (status === 401 || status === 403) throw new Error("坚果云拒绝访问，请检查账号与第三方应用密码。");
+      throw new Error(`同步到坚果云失败：${error?.message || "网络请求失败"}`);
+    }
+    return { entries: wordbook.entries.length, url };
   }
   updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex, annotationID = "", replaceOriginalWord = false) {
     const before = document.body.innerHTML;
