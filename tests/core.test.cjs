@@ -153,6 +153,7 @@ test('Nutstore settings accept the official HTTPS DAV endpoint and per-document 
     serverUrl:'https://dav.jianguoyun.com/dav/', enabled:true
   });
   assert.equal(app.nutstoreFilename('my-wordbook.json'), 'my-wordbook.json');
+  assert.equal(app.nutstoreFileUrl('my-wordbook.json'), 'https://dav.jianguoyun.com/dav/LexiNote/my-wordbook.json');
   assert.throws(() => app.nutstoreFilename('folder/wordbook.json'), /文件名/);
   assert.throws(() => app.nutstoreConfig({...config, nutstoreServerUrl:'http://dav.jianguoyun.com/dav/'}), /HTTPS/);
 });

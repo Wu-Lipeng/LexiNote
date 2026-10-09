@@ -21,8 +21,8 @@ android {
         applicationId = "com.lexinote.mobile"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "0.1.2-beta.2"
+        versionCode = 21
+        versionName = "0.1.2-beta.3"
         buildConfigField("String", "GITHUB_REPOSITORY", "\"Wu-Lipeng/LexiNote\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

@@ -45,15 +45,17 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
+private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
 
 @Composable private fun LexiNoteApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { WordbookRepository(context) }
     val nutstoreSettings = remember { NutstoreSettingsRepository(context) }
     var entries by remember { mutableStateOf(repo.load()) }
+    var books by remember { mutableStateOf(repo.loadBooks()) }
     var page by remember { mutableStateOf(Page.HOME) }
     var selected by remember { mutableStateOf<WordEntry?>(null) }
+    var selectedBook by remember { mutableStateOf<StoredWordbook?>(null) }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
     var syncMessage by remember { mutableStateOf("") }
     val appScope = rememberCoroutineScope()
@@ -69,10 +71,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
         val config = nutstoreSettings.load()
         if (config.isConfigured()) {
             syncMessage = "正在从坚果云检查词库…"
-            runCatching { NutstoreWebDavRepository.downloadWordbook(config) }
-                .onSuccess { content ->
-                    runCatching { repo.import(content) }
-                        .onSuccess { count -> entries = repo.load(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
+            runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
+                .onSuccess { remoteBooks ->
+                    runCatching { remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) } }
+                        .onSuccess { count -> entries = repo.load(); books = repo.loadBooks(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
                         .onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
                 }
                 .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
@@ -86,7 +88,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
             }
         }.onSuccess { content ->
             runCatching { repo.import(content) }.onSuccess { count ->
-                entries = repo.load(); Toast.makeText(context, "已导入 $count 个词条", Toast.LENGTH_SHORT).show()
+                entries = repo.load(); books = repo.loadBooks(); Toast.makeText(context, "已导入 $count 个词条", Toast.LENGTH_SHORT).show()
             }.onFailure { Toast.makeText(context, it.message ?: "导入失败", Toast.LENGTH_LONG).show() }
         }.onFailure { Toast.makeText(context, it.message ?: "读取失败", Toast.LENGTH_LONG).show() }
     }
@@ -103,15 +105,16 @@ private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
         }
         Page.REVIEW -> ReviewPage(entries, onBack = { page = Page.HOME }) { entry, grade ->
             entries = entries.map { if (it.id == entry.id) it.copy(review = ReviewScheduler.schedule(it.review, grade)) else it }
-            repo.save(entries)
+            repo.updateReview(entry.id, entries.first { it.id == entry.id }.review)
         }
-        Page.LIBRARY -> Library(entries, importFile, onBack = { page = Page.HOME }) { entry -> selected = entry; page = Page.DETAIL }
-        Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.LIBRARY }) }
+        Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
+        Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
+        Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.WORDBOOK }) }
         Page.SETTINGS -> NutstoreSettingsPage(nutstoreSettings, onBack = { page = Page.HOME }) { config -> appScope.launch {
                 syncMessage = "正在从坚果云检查词库…"
-                runCatching { NutstoreWebDavRepository.downloadWordbook(config) }
-                    .onSuccess { content -> runCatching { repo.import(content) }
-                        .onSuccess { count -> entries = repo.load(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
+                runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
+                    .onSuccess { remoteBooks -> runCatching { remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) } }
+                        .onSuccess { count -> entries = repo.load(); books = repo.loadBooks(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
                         .onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
                     }
                     .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
@@ -132,7 +135,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
             UpdateBanner(updateState, onUpdate)
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
-            OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("查看词库") }
+            OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
         }
     }
@@ -161,11 +164,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
     Scaffold(topBar = { BackBar("坚果云同步", onBack) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-            item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 仅在每次打开时检查远端词库。", style = MaterialTheme.typography.bodyMedium) }
+            item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 每次打开时检查 LexiNote 文件夹，并将其中每个 JSON 建为独立生词本。", style = MaterialTheme.typography.bodyMedium) }
             item { OutlinedTextField(config.serverUrl, { config = config.copy(serverUrl = it) }, Modifier.fillMaxWidth(), label = { Text("WebDAV 地址") }, singleLine = true) }
             item { OutlinedTextField(config.username, { config = config.copy(username = it) }, Modifier.fillMaxWidth(), label = { Text("坚果云账号邮箱") }, singleLine = true) }
             item { OutlinedTextField(config.password, { config = config.copy(password = it) }, Modifier.fillMaxWidth(), label = { Text("第三方应用密码") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) }
-            item { OutlinedTextField(config.filename, { config = config.copy(filename = it) }, Modifier.fillMaxWidth(), label = { Text("同步文件名") }, supportingText = { Text("须与 Zotero 插件中配置的文件名完全相同") }, singleLine = true) }
             item {
                 Button(onClick = {
                     runCatching { repository.save(config) }
@@ -257,10 +259,23 @@ private enum class Page { HOME, REVIEW, LIBRARY, DETAIL, SETTINGS }
     Button(onClick = onBack, modifier = Modifier.padding(top = 28.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("返回首页") }
 }
 
-@Composable private fun Library(entries: List<WordEntry>, onImport: () -> Unit, onBack: () -> Unit, onOpen: (WordEntry) -> Unit) {
+@Composable private fun Library(books: List<StoredWordbook>, onImport: () -> Unit, onBack: () -> Unit, onOpen: (StoredWordbook) -> Unit) {
+    Scaffold(topBar = { BackBar("Zotero 词库（${books.size}）", onBack, onImport) }) { padding ->
+        LazyColumn(Modifier.padding(padding)) {
+            item { Text("Zotero", modifier = Modifier.padding(20.dp, 16.dp, 20.dp, 4.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("坚果云 LexiNote 文件夹中的每个 JSON 都会成为一个独立生词本。", modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall, color = Color(0xFF6A706C)) }
+            items(books, key = { it.id }) { book ->
+                ListItem(headlineContent = { Text(book.title, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text("${book.entries.size} 个词条") }, modifier = Modifier.clickable { onOpen(book) })
+                HorizontalDivider()
+            }
+        }
+    }
+}
+
+@Composable private fun WordbookEntries(book: StoredWordbook, onBack: () -> Unit, onOpen: (WordEntry) -> Unit) {
     var query by remember { mutableStateOf("") }
-    val visible = entries.filter { it.word.contains(query, true) || it.meanings.any { meaning -> meaning.contains(query, true) } }
-    Scaffold(topBar = { BackBar("词库（${entries.size}）", onBack, onImport) }) { padding ->
+    val visible = book.entries.filter { it.word.contains(query, true) || it.meanings.any { meaning -> meaning.contains(query, true) } }
+    Scaffold(topBar = { BackBar("${book.title}（${book.entries.size}）", onBack) }) { padding ->
         Column(Modifier.padding(padding)) {
             OutlinedTextField(query, { query = it }, Modifier.fillMaxWidth().padding(16.dp), label = { Text("搜索单词或释义") }, singleLine = true)
             LazyColumn { items(visible, key = { it.id }) { entry ->

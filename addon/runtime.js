@@ -101,9 +101,22 @@ var LexiNoteRuntime = class {
     if (!/^[^\\/\\\\\u0000-\u001F]+\.json$/i.test(filename) || filename === ".json") throw new Error("同步文件名必须是不含路径的 .json 文件名。");
     return filename;
   }
-  nutstoreFileUrl(filename, config = this.config) {
+  nutstoreFolderUrl(config = this.config) {
     const settings = this.nutstoreConfig(config);
-    return new URL(encodeURIComponent(this.nutstoreFilename(filename)), settings.serverUrl).href;
+    return new URL("LexiNote/", settings.serverUrl).href;
+  }
+  nutstoreFileUrl(filename, config = this.config) {
+    return new URL(encodeURIComponent(this.nutstoreFilename(filename)), this.nutstoreFolderUrl(config)).href;
+  }
+  async ensureNutstoreFolder(credentials) {
+    const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
+    try {
+      await Zotero.HTTP.request("MKCOL", this.nutstoreFolderUrl(), { headers: { "Authorization": `Basic ${auth}` }, timeout: 30000 });
+    } catch (error) {
+      const status = error?.status || error?.xmlhttp?.status;
+      // WebDAV returns 405 when the collection already exists.
+      if (status !== 405) throw error;
+    }
   }
   async saveConfig(input, key, nutstoreUsername, nutstorePassword) {
     const config = LexiNoteCore.validate(input, !input.enabled);
@@ -906,6 +919,7 @@ var LexiNoteRuntime = class {
     const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
     const url = this.nutstoreFileUrl(filename);
     try {
+      await this.ensureNutstoreFolder(credentials);
       await Zotero.HTTP.request("PUT", url, {
         body: JSON.stringify(wordbook, null, 2) + "\n",
         headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json; charset=utf-8" },
