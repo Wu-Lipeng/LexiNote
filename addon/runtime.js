@@ -403,20 +403,26 @@ var LexiNoteRuntime = class {
       try {
         const saved = await this.saveWord({ attachmentID, word: entry.word, originalWord: word, result: entry.result, pageLabel, pageIndex });
         let marking = null;
+        let associationWarning = "";
         // Persist the highlighter identifier before opening the note. Opening
         // first can leave the note iframe on an older revision without the
         // annotation URL parameter used for exact navigation.
         if (!saved.duplicate) {
           marking = this.markForNewEntry(reader, highlightDraft);
-          if (marking.annotationID) await this.saveAnnotationID(saved.noteID, entry.word, word, marking.annotationID, attachmentID);
+          if (marking.annotationID) {
+            try { await this.saveAnnotationID(saved.noteID, entry.word, word, marking.annotationID, attachmentID); }
+            catch (_) { associationWarning = " 高亮关联未保存，但单词已保存。"; }
+          }
           await this.openNotebookAtEnd(saved.noteID);
         } else {
           // Re-saving an existing word is allowed to repair a missing
           // association, but must never create a second PDF annotation.
           const existing = this.existingMark(reader, highlightDraft);
           if (existing?.id && !await this.savedAnnotationID(saved.noteID, entry.word, word)) {
-            await this.saveAnnotationID(saved.noteID, entry.word, word, existing.id, attachmentID);
-            marking = { marked: true, existing: true, annotationID: existing.id };
+            try {
+              await this.saveAnnotationID(saved.noteID, entry.word, word, existing.id, attachmentID);
+              marking = { marked: true, existing: true, annotationID: existing.id };
+            } catch (_) { associationWarning = " 高亮关联未保存，但单词已保存。"; }
           }
         }
         if (!disposed) {
@@ -430,6 +436,7 @@ var LexiNoteRuntime = class {
           } else if (marking?.existing) {
             status.textContent += " 已关联已有标记并补全高亮 ID。";
           }
+          status.textContent += associationWarning;
           saveButton.textContent = "已保存";
         }
       } catch (error) {
@@ -1130,6 +1137,9 @@ var LexiNoteRuntime = class {
   async saveAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
     const note = await Zotero.Items.getAsync(noteID);
     if (!note?.isEditable?.()) return;
+    // This may run immediately after writeWord(). Always refresh first so a
+    // cached editor revision cannot overwrite the just-saved vocabulary entry.
+    if (typeof note.reload === "function") await note.reload(["note"], true);
     const document = new DOMParser().parseFromString(note.getNote(), "text/html");
     const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
     const heading = this.wordHeadings(document).find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
@@ -1313,6 +1323,7 @@ var LexiNoteRuntime = class {
           candidate.setNote(candidateDocument.body.innerHTML);
           try { await candidate.saveTx(); }
           catch (_) { throw new Error("已保存的生词格式更新失败，请检查文献库权限后重试。"); }
+          await this.verifySavedWord(candidate.id, normalizedWord, normalizedOriginalWord);
         }
         return { noteID: candidate.id, duplicate: true, formatUpdated };
       }
@@ -1348,7 +1359,26 @@ var LexiNoteRuntime = class {
       if (!fresh) await note.reload(["note"], true).catch(() => {});
       throw new Error("笔记保存失败，请检查文献库权限后重试。");
     }
+    await this.verifySavedWord(note.id, normalizedWord, normalizedOriginalWord);
     return { noteID: note.id, duplicate: false };
+  }
+  async verifySavedWord(noteID, normalizedWord, normalizedOriginalWord = "") {
+    // A successful saveTx can leave the in-memory note editor on an older
+    // revision. Reload before opening it, then verify that the entry survived
+    // the write. This keeps the UI from claiming success for an invisible or
+    // overwritten entry.
+    const note = await Zotero.Items.getAsync(noteID);
+    if (!note || note.deleted) throw new Error("生词本保存后无法重新读取，请重试。");
+    if (typeof note.reload === "function") {
+      try { await note.reload(["note"], true); }
+      catch (_) { throw new Error("生词本保存后无法刷新，请重试。"); }
+    }
+    const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+    const heading = [...document.querySelectorAll("h3")].find(h =>
+      this.matchesSavedWord(h, normalizedWord) || (normalizedOriginalWord && this.matchesSavedWord(h, normalizedOriginalWord))
+    );
+    if (!heading) throw new Error("生词本保存后未找到该单词，请重试。");
+    return note;
   }
   stop() {
     this.alive = false;

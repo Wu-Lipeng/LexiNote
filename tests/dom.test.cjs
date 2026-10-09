@@ -21,6 +21,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
         getNote(){return this.text;} setNote(text){this.text=text;}
         getNotes(){return [...store.values()].filter(n=>n.type==='note'&&n.parentID===this.id&&!n.deleted).map(n=>n.id);}
         async saveTx(){await new Promise(r=>setTimeout(r,1));if(!this.id)this.id=nextID++;store.set(this.id,this);return this.id;}
+        async reload(){this.reloaded=true;return this;}
       }
       let pref='{}';
       const openedNotes=[];const scrollBox={scrollHeight:321,scrollTop:0};let locatedHeading=false;
@@ -42,6 +43,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       check(saved[2].duplicate,'Duplicate word detected');
       const note=store.get(saved[0].noteID);
       check(note.getNote().includes('alpha')&&note.getNote().includes('beta'),'Concurrent words preserved');
+      check(note.reloaded,'Saved note is reloaded and verified before it is reported as saved');
       check(note.getNote().includes('?page=3'),'Source page link preserved');
       note.setNote(note.getNote().replace('</h1>','</h1><p>Manual text</p>'));
       const evil=entry('gamma');evil.result.meaning='<script>alert(1)</script>';
