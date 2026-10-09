@@ -118,9 +118,9 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("syncWordbook").disabled = true;
       try {
         $("status").textContent = "正在同步当前词库到坚果云…";
-        const filename = await app.promptNutstoreFilename(window);
+        const filename = await app.savedNutstoreFilename(await app.exportParentItem()) || await app.promptNutstoreFilename(window);
         const result = await app.syncCurrentWordbookToNutstore(filename);
-        $("status").textContent = `已同步 ${result.entries} 个词条到坚果云：\n${result.url}`;
+        $("status").textContent = `已同步 ${result.entries} 个词条到坚果云：\n${result.filename}\n${result.url}`;
       } catch (e) { $("status").textContent = e.message || "坚果云同步失败。"; }
       finally { updateNutstoreAvailability(); }
     });

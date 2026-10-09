@@ -911,6 +911,35 @@ var LexiNoteRuntime = class {
     if (!Services.prompt.prompt(window, "同步当前词库到坚果云", "请输入本篇文章的同步文件名（.json）：", input, null, {})) throw new Error("已取消坚果云同步。");
     return this.nutstoreFilename(input.value);
   }
+  async savedNutstoreFilename(parent) {
+    const values = new Set();
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag?.(this.tag)) continue;
+      const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      const filename = String(root.dataset.lexinoteNutstoreFilename || "").trim();
+      if (filename) values.add(this.nutstoreFilename(filename));
+    }
+    if (values.size > 1) throw new Error("当前文献的多个 LexiNote 生词本记录了不同的坚果云文件名，请先整理生词本后再同步。");
+    return [...values][0] || "";
+  }
+  async saveNutstoreFilename(parent, filename) {
+    const safeFilename = this.nutstoreFilename(filename);
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    let saved = 0;
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag?.(this.tag) || !note.isEditable?.()) continue;
+      const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      root.dataset.lexinoteNutstoreFilename = safeFilename;
+      note.setNote(document.body.innerHTML);
+      await note.saveTx();
+      saved++;
+    }
+    if (!saved) throw new Error("同步完成，但未能将文件名写回可编辑的 LexiNote 生词本。");
+    return safeFilename;
+  }
   async syncCurrentWordbookToNutstore(filename) {
     if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
     const parent = await this.exportParentItem();
@@ -930,7 +959,8 @@ var LexiNoteRuntime = class {
       if (status === 401 || status === 403) throw new Error("坚果云拒绝访问，请检查账号与第三方应用密码。");
       throw new Error(`同步到坚果云失败：${error?.message || "网络请求失败"}`);
     }
-    return { entries: wordbook.entries.length, url };
+    await this.saveNutstoreFilename(parent, filename);
+    return { entries: wordbook.entries.length, url, filename };
   }
   updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex, annotationID = "", replaceOriginalWord = false) {
     const before = document.body.innerHTML;
