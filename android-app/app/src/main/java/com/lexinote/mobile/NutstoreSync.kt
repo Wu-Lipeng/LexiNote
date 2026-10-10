@@ -79,6 +79,13 @@ object NutstoreWebDavRepository {
         .method(method, body)
         .build()
 
+    private fun webDavFailure(status: Int, action: String): Nothing = when (status) {
+        401 -> throw IllegalStateException("坚果云身份验证失败（HTTP 401）：请检查 App 中保存的账号邮箱和第三方应用密码是否与插件一致")
+        403 -> throw IllegalStateException("坚果云拒绝$action（HTTP 403）：账号已到达服务器，但没有读取 LexiNote 文件夹的权限")
+        404 -> throw IllegalStateException("坚果云中尚未创建 LexiNote 文件夹（HTTP 404）：请先在插件中同步一篇文章")
+        else -> throw IllegalStateException("坚果云${action}失败（HTTP $status）")
+    }
+
     suspend fun downloadWordbooks(config: NutstoreConfig): List<RemoteWordbook> = withContext(Dispatchers.IO) {
         require(config.isConfigured()) { "请先填写完整的坚果云 WebDAV 设置" }
         val folder = config.remoteFolderUrl()
@@ -91,16 +98,14 @@ object NutstoreWebDavRepository {
                     .mapNotNull { href -> remoteJsonUrl(folder, href) }
                     .distinctBy { it.toString() }
                     .map { url -> RemoteWordbook(filename(url), download(config, url)) }
-                401, 403 -> throw IllegalStateException("坚果云拒绝访问，请检查账号与第三方应用密码")
-                404 -> throw IllegalStateException("坚果云中尚未创建 LexiNote 文件夹，请先在插件中同步一篇文章")
-                else -> throw IllegalStateException("坚果云返回 HTTP ${response.code}")
+                else -> webDavFailure(response.code, "读取 LexiNote 文件夹")
             }
         }
     }
 
     private fun download(config: NutstoreConfig, url: URL): String {
         client.newCall(request(config, url, "GET")).execute().use { response ->
-            check(response.code in 200..299) { "下载 ${filename(url)} 时返回 HTTP ${response.code}" }
+            if (response.code !in 200..299) webDavFailure(response.code, "下载 ${filename(url)}")
             return response.body?.string().orEmpty()
         }
     }
