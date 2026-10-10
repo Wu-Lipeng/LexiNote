@@ -60,6 +60,24 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     var betaUpdateState by remember { mutableStateOf<UpdateState?>(null) }
     var syncMessage by remember { mutableStateOf("") }
     val appScope = rememberCoroutineScope()
+    val syncFromNutstore: (NutstoreConfig) -> Unit = { config ->
+        appScope.launch {
+            syncMessage = "正在从坚果云检查词库…"
+            runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
+                .onSuccess { remoteBooks ->
+                    if (remoteBooks.isEmpty()) {
+                        syncMessage = "坚果云 LexiNote 文件夹中暂无 JSON 词库"
+                    } else runCatching {
+                        val entryCount = remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) }
+                        remoteBooks.size to entryCount
+                    }.onSuccess { (bookCount, entryCount) ->
+                        entries = repo.load(); books = repo.loadBooks()
+                        syncMessage = "已从坚果云更新 $bookCount 本词库、$entryCount 个词条；复习进度已保留"
+                    }.onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
+                }
+                .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
+        }
+    }
     LaunchedEffect(Unit) {
         updateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY) }
             .fold(
@@ -70,16 +88,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 }
             )
         val config = nutstoreSettings.load()
-        if (config.isConfigured()) {
-            syncMessage = "正在从坚果云检查词库…"
-            runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
-                .onSuccess { remoteBooks ->
-                    runCatching { remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) } }
-                        .onSuccess { count -> entries = repo.load(); books = repo.loadBooks(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
-                        .onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
-                }
-                .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
-        }
+        if (config.isConfigured()) syncFromNutstore(config)
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) runCatching {
@@ -120,16 +129,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
         Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
         Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.WORDBOOK }) }
-        Page.SETTINGS -> NutstoreSettingsPage(nutstoreSettings, onBack = { page = Page.HOME }) { config -> appScope.launch {
-                syncMessage = "正在从坚果云检查词库…"
-                runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
-                    .onSuccess { remoteBooks -> runCatching { remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) } }
-                        .onSuccess { count -> entries = repo.load(); books = repo.loadBooks(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
-                        .onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
-                    }
-                    .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
-            }
-        }
+        Page.SETTINGS -> NutstoreSettingsPage(nutstoreSettings, syncMessage, onBack = { page = Page.HOME }, onSync = syncFromNutstore)
     }
 }
 
@@ -187,9 +187,9 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit) {
+@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, syncMessage: String, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit) {
     var config by remember { mutableStateOf(repository.load()) }
-    var status by remember { mutableStateOf("") }
+    var saveStatus by remember { mutableStateOf("") }
     Scaffold(topBar = { BackBar("坚果云同步", onBack) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
@@ -200,18 +200,18 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             item {
                 Button(onClick = {
                     runCatching { repository.save(config) }
-                        .onSuccess { status = "设置已保存。" }
-                        .onFailure { status = it.message ?: "设置保存失败" }
+                        .onSuccess { saveStatus = "设置已保存。" }
+                        .onFailure { saveStatus = it.message ?: "设置保存失败" }
                 }, modifier = Modifier.fillMaxWidth()) { Text("保存设置") }
             }
             item {
                 OutlinedButton(onClick = {
                     runCatching { repository.save(config) }
-                        .onSuccess { onSync(config); status = "正在同步…" }
-                        .onFailure { status = it.message ?: "请先填写完整、有效的设置" }
+                        .onSuccess { onSync(config) }
+                        .onFailure { saveStatus = it.message ?: "请先填写完整、有效的设置" }
                 }, modifier = Modifier.fillMaxWidth(), enabled = config.isConfigured()) { Text("立即从坚果云同步") }
             }
-            status.takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
+            (syncMessage.ifBlank { saveStatus }).takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
             item {
                 val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
                 Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
