@@ -12,8 +12,18 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+
+internal fun parseWebDavHrefs(xml: String): List<String> {
+    val href = Regex("""<(?:[A-Za-z][\w.-]*:)?href(?:\s[^>]*)?>(.*?)</(?:[A-Za-z][\w.-]*:)?href\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    return href.findAll(xml).map { match ->
+        match.groupValues[1].trim()
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+    }.toList()
+}
 
 data class NutstoreConfig(
     val serverUrl: String = DEFAULT_SERVER_URL,
@@ -94,7 +104,7 @@ object NutstoreWebDavRepository {
         val request = request(config, folder, "PROPFIND", body).newBuilder().header("Depth", "1").build()
         client.newCall(request).execute().use { response ->
             when (response.code) {
-                207 -> parseHrefs(response.body?.string().orEmpty())
+                207 -> parseWebDavHrefs(response.body?.string().orEmpty())
                     .mapNotNull { href -> remoteJsonUrl(folder, href) }
                     .distinctBy { it.toString() }
                     .map { url -> RemoteWordbook(filename(url), download(config, url)) }
@@ -108,17 +118,6 @@ object NutstoreWebDavRepository {
             if (response.code !in 200..299) webDavFailure(response.code, "下载 ${filename(url)}")
             return response.body?.string().orEmpty()
         }
-    }
-
-    private fun parseHrefs(xml: String): List<String> {
-        val parser = XmlPullParserFactory.newInstance().newPullParser()
-        parser.setInput(xml.reader())
-        val values = mutableListOf<String>()
-        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG && parser.name.equals("href", true)) values += parser.nextText()
-            parser.next()
-        }
-        return values
     }
 
     private fun remoteJsonUrl(folder: URL, href: String): URL? = runCatching {
