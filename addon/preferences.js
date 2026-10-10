@@ -239,7 +239,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
-    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
+    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "nutstoreEnabled", "nutstoreUsername", "nutstorePassword", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
     for (const id of settingControls) {
       $(id).addEventListener("input", () => { dirty = true; });
       $(id).addEventListener("change", () => { dirty = true; });
