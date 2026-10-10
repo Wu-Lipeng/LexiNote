@@ -129,8 +129,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     when (page) {
         Page.HOME -> Home(scopedEntries, updateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }, installUpdate)
         Page.REVIEW -> ReviewPage(scopedEntries, onBack = { page = Page.HOME }) { entry, grade ->
-            entries = entries.map { if (it.id == entry.id) it.copy(review = ReviewScheduler.schedule(it.review, grade)) else it }
-            repo.updateReview(entry.id, entries.first { it.id == entry.id }.review)
+            val updatedReview = ReviewScheduler.schedule(entry.review, grade)
+            repo.updateReview(entry.id, updatedReview)
+            entries = repo.load()
+            books = repo.loadBooks()
         }
         Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
         Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
