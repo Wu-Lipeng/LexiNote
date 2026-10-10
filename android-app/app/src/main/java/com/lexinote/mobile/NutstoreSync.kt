@@ -4,9 +4,14 @@ import android.content.Context
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
 import java.net.URLDecoder
 import java.net.URL
+import java.util.concurrent.TimeUnit
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 
@@ -56,45 +61,48 @@ class NutstoreSettingsRepository(context: Context) {
 object NutstoreWebDavRepository {
     data class RemoteWordbook(val filename: String, val content: String)
 
+    // HttpURLConnection rejects WebDAV methods such as PROPFIND on Android.
+    // OkHttp accepts custom methods and keeps the request within the normal TLS stack.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
     private fun authorization(config: NutstoreConfig): String {
         val credentials = "${config.username}:${config.password}"
         return "Basic ${Base64.encodeToString(credentials.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)}"
     }
 
-    private fun open(config: NutstoreConfig, url: URL, method: String): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
-        requestMethod = method; connectTimeout = 12_000; readTimeout = 20_000
-        setRequestProperty("Authorization", authorization(config))
-    }
+    private fun request(config: NutstoreConfig, url: URL, method: String, body: RequestBody? = null): Request = Request.Builder()
+        .url(url)
+        .header("Authorization", authorization(config))
+        .method(method, body)
+        .build()
 
     suspend fun downloadWordbooks(config: NutstoreConfig): List<RemoteWordbook> = withContext(Dispatchers.IO) {
         require(config.isConfigured()) { "请先填写完整的坚果云 WebDAV 设置" }
         val folder = config.remoteFolderUrl()
-        val connection = open(config, folder, "PROPFIND")
-        try {
-            connection.setRequestProperty("Depth", "1")
-            connection.setRequestProperty("Content-Type", "text/xml; charset=utf-8")
-            connection.doOutput = true
-            connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>") }
-            when (connection.responseCode) {
-                207 -> parseHrefs(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+        val xml = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>"
+        val body = xml.toRequestBody("text/xml; charset=utf-8".toMediaType())
+        val request = request(config, folder, "PROPFIND", body).newBuilder().header("Depth", "1").build()
+        client.newCall(request).execute().use { response ->
+            when (response.code) {
+                207 -> parseHrefs(response.body?.string().orEmpty())
                     .mapNotNull { href -> remoteJsonUrl(folder, href) }
                     .distinctBy { it.toString() }
                     .map { url -> RemoteWordbook(filename(url), download(config, url)) }
-                HttpURLConnection.HTTP_UNAUTHORIZED, HttpURLConnection.HTTP_FORBIDDEN -> throw IllegalStateException("坚果云拒绝访问，请检查账号与第三方应用密码")
-                HttpURLConnection.HTTP_NOT_FOUND -> throw IllegalStateException("坚果云中尚未创建 LexiNote 文件夹，请先在插件中同步一篇文章")
-                else -> throw IllegalStateException("坚果云返回 HTTP ${connection.responseCode}")
+                401, 403 -> throw IllegalStateException("坚果云拒绝访问，请检查账号与第三方应用密码")
+                404 -> throw IllegalStateException("坚果云中尚未创建 LexiNote 文件夹，请先在插件中同步一篇文章")
+                else -> throw IllegalStateException("坚果云返回 HTTP ${response.code}")
             }
-        } finally {
-            connection.disconnect()
         }
     }
 
     private fun download(config: NutstoreConfig, url: URL): String {
-        val connection = open(config, url, "GET")
-        try {
-            check(connection.responseCode in 200..299) { "下载 ${filename(url)} 时返回 HTTP ${connection.responseCode}" }
-            return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        } finally { connection.disconnect() }
+        client.newCall(request(config, url, "GET")).execute().use { response ->
+            check(response.code in 200..299) { "下载 ${filename(url)} 时返回 HTTP ${response.code}" }
+            return response.body?.string().orEmpty()
+        }
     }
 
     private fun parseHrefs(xml: String): List<String> {
