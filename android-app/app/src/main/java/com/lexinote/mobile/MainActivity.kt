@@ -51,8 +51,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { WordbookRepository(context) }
     val nutstoreSettings = remember { NutstoreSettingsRepository(context) }
+    val studyScopeRepository = remember { StudyScopeRepository(context) }
     var entries by remember { mutableStateOf(repo.load()) }
     var books by remember { mutableStateOf(repo.loadBooks()) }
+    var studyScope by remember { mutableStateOf(studyScopeRepository.load()) }
     var page by remember { mutableStateOf(Page.HOME) }
     var selected by remember { mutableStateOf<WordEntry?>(null) }
     var selectedBook by remember { mutableStateOf<StoredWordbook?>(null) }
@@ -103,39 +105,54 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         }.onFailure { Toast.makeText(context, it.message ?: "读取失败", Toast.LENGTH_LONG).show() }
     }
     val importFile = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }
-    when (page) {
-        Page.HOME -> Home(entries, updateState, betaUpdateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }, {
-            appScope.launch {
-                betaUpdateState = UpdateState.Checking
-                betaUpdateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY, UpdateChannel.BETA) }
-                    .fold(
-                        onSuccess = { update -> update?.let(UpdateState::Available) ?: UpdateState.UpToDate },
-                        onFailure = { error -> UpdateState.Failed(error.message ?: "无法连接 GitHub") }
-                    )
-            }
-        }) { update ->
-            if (!UpdateInstaller.canInstall(context)) {
-                Toast.makeText(context, "请允许 LexiNote 安装未知来源应用后重试", Toast.LENGTH_LONG).show()
-                UpdateInstaller.openInstallPermission(context)
-            } else {
-                UpdateInstaller.downloadAndInstall(context.applicationContext, update)
-                Toast.makeText(context, "正在下载 ${update.version}", Toast.LENGTH_SHORT).show()
-            }
+    val scopedEntries = studyScope.entriesFrom(books)
+    val checkBetaUpdate: () -> Unit = {
+        appScope.launch {
+            betaUpdateState = UpdateState.Checking
+            betaUpdateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY, UpdateChannel.BETA) }
+                .fold(
+                    onSuccess = { update -> update?.let(UpdateState::Available) ?: UpdateState.UpToDate },
+                    onFailure = { error -> UpdateState.Failed(error.message ?: "无法连接 GitHub") }
+                )
         }
-        Page.REVIEW -> ReviewPage(entries, onBack = { page = Page.HOME }) { entry, grade ->
+        Unit
+    }
+    val installUpdate: (UpdateInfo) -> Unit = { update ->
+        if (!UpdateInstaller.canInstall(context)) {
+            Toast.makeText(context, "请允许 LexiNote 安装未知来源应用后重试", Toast.LENGTH_LONG).show()
+            UpdateInstaller.openInstallPermission(context)
+        } else {
+            UpdateInstaller.downloadAndInstall(context.applicationContext, update)
+            Toast.makeText(context, "正在下载 ${update.version}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    when (page) {
+        Page.HOME -> Home(scopedEntries, updateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }, installUpdate)
+        Page.REVIEW -> ReviewPage(scopedEntries, onBack = { page = Page.HOME }) { entry, grade ->
             entries = entries.map { if (it.id == entry.id) it.copy(review = ReviewScheduler.schedule(it.review, grade)) else it }
             repo.updateReview(entry.id, entries.first { it.id == entry.id }.review)
         }
         Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
         Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
         Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.WORDBOOK }) }
-        Page.SETTINGS -> NutstoreSettingsPage(nutstoreSettings, syncMessage, onBack = { page = Page.HOME }, onSync = syncFromNutstore)
+        Page.SETTINGS -> NutstoreSettingsPage(
+            repository = nutstoreSettings,
+            books = books,
+            studyScope = studyScope,
+            syncMessage = syncMessage,
+            betaUpdateState = betaUpdateState,
+            onBack = { page = Page.HOME },
+            onSync = syncFromNutstore,
+            onStudyScopeChanged = { scope -> studyScope = scope; studyScopeRepository.save(scope) },
+            onCheckBeta = checkBetaUpdate,
+            onUpdate = installUpdate
+        )
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, betaUpdateState: UpdateState?, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
-    Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "坚果云设置") } }) }) { padding ->
+    Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "设置") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("把 Zotero 生词本带在身边", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("从 LexiNote 导出的 JSON 文件导入，所有复习记录只保存在本机。")
@@ -143,7 +160,6 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 Column(Modifier.padding(20.dp)) { Text("今日待复习", style = MaterialTheme.typography.labelLarge); Text("$due", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold); Text("共 ${entries.size} 个词条") }
             }
             UpdateBanner(updateState, onUpdate)
-            BetaUpdateBanner(betaUpdateState, onCheckBeta, onUpdate)
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
@@ -174,7 +190,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     when (state) {
         UpdateState.Checking -> Text("正在检查更新…", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
         UpdateState.UpToDate -> Text("当前已是最新版本", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
-        is UpdateState.Failed -> Text("暂时无法检查更新", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Failed -> Text("无法检查更新：${state.reason}", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
         is UpdateState.Available -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F4ED))) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -187,10 +203,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, syncMessage: String, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit) {
+@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, books: List<StoredWordbook>, studyScope: StudyScope, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onStudyScopeChanged: (StudyScope) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     var config by remember { mutableStateOf(repository.load()) }
     var saveStatus by remember { mutableStateOf("") }
-    Scaffold(topBar = { BackBar("坚果云同步", onBack) }) { padding ->
+    Scaffold(topBar = { BackBar("设置", onBack) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 每次打开时检查 LexiNote 文件夹，并将其中每个 JSON 建为独立生词本。", style = MaterialTheme.typography.bodyMedium) }
@@ -212,6 +228,44 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 }, modifier = Modifier.fillMaxWidth(), enabled = config.isConfigured()) { Text("立即从坚果云同步") }
             }
             (syncMessage.ifBlank { saveStatus }).takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { Text("背词范围", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("首页待复习数量和开始复习的内容，仅包含这里选定的生词本。", style = MaterialTheme.typography.bodyMedium) }
+            item {
+                Row(Modifier.fillMaxWidth().clickable {
+                    onStudyScopeChanged(
+                        if (studyScope.useAllBooks) StudyScope(false, books.map { it.id }.toSet()) else StudyScope(true)
+                    )
+                }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(studyScope.useAllBooks, onCheckedChange = { checked ->
+                        onStudyScopeChanged(if (checked) StudyScope(true) else StudyScope(false, books.map { it.id }.toSet()))
+                    })
+                    Text("全部 Zotero 词库", fontWeight = FontWeight.Medium)
+                }
+            }
+            if (!studyScope.useAllBooks) {
+                if (books.isEmpty()) item { Text("尚无可选择的生词本。", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
+                items(books, key = { it.id }) { book ->
+                    val checked = book.id in studyScope.selectedBookIds
+                    Row(Modifier.fillMaxWidth().clickable {
+                        val selectedIds = if (checked) studyScope.selectedBookIds - book.id else studyScope.selectedBookIds + book.id
+                        onStudyScopeChanged(studyScope.copy(selectedBookIds = selectedIds))
+                    }.padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked, onCheckedChange = { selected ->
+                            val selectedIds = if (selected) studyScope.selectedBookIds + book.id else studyScope.selectedBookIds - book.id
+                            onStudyScopeChanged(studyScope.copy(selectedBookIds = selectedIds))
+                        })
+                        Column {
+                            Text(book.title)
+                            Text("${book.entries.size} 个词条", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6A706C))
+                        }
+                    }
+                }
+            }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { Text("测试版", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("测试版包含尚未正式发布的功能，需要由你主动检查并安装。", style = MaterialTheme.typography.bodyMedium) }
+            item { BetaUpdateBanner(betaUpdateState, onCheckBeta, onUpdate) }
             item {
                 val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
                 Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
