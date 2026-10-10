@@ -212,6 +212,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 }, modifier = Modifier.fillMaxWidth(), enabled = config.isConfigured()) { Text("立即从坚果云同步") }
             }
             status.takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
+            item {
+                val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
+                Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }
