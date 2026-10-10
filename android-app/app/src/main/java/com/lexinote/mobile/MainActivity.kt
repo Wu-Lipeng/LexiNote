@@ -57,6 +57,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     var selected by remember { mutableStateOf<WordEntry?>(null) }
     var selectedBook by remember { mutableStateOf<StoredWordbook?>(null) }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
+    var betaUpdateState by remember { mutableStateOf<UpdateState?>(null) }
     var syncMessage by remember { mutableStateOf("") }
     val appScope = rememberCoroutineScope()
     LaunchedEffect(Unit) {
@@ -94,7 +95,16 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
     val importFile = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }
     when (page) {
-        Page.HOME -> Home(entries, updateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }) { update ->
+        Page.HOME -> Home(entries, updateState, betaUpdateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }, {
+            appScope.launch {
+                betaUpdateState = UpdateState.Checking
+                betaUpdateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY, UpdateChannel.BETA) }
+                    .fold(
+                        onSuccess = { update -> update?.let(UpdateState::Available) ?: UpdateState.UpToDate },
+                        onFailure = { error -> UpdateState.Failed(error.message ?: "无法连接 GitHub") }
+                    )
+            }
+        }) { update ->
             if (!UpdateInstaller.canInstall(context)) {
                 Toast.makeText(context, "请允许 LexiNote 安装未知来源应用后重试", Toast.LENGTH_LONG).show()
                 UpdateInstaller.openInstallPermission(context)
@@ -123,7 +133,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, betaUpdateState: UpdateState?, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
     Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "坚果云设置") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -133,10 +143,29 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 Column(Modifier.padding(20.dp)) { Text("今日待复习", style = MaterialTheme.typography.labelLarge); Text("$due", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold); Text("共 ${entries.size} 个词条") }
             }
             UpdateBanner(updateState, onUpdate)
+            BetaUpdateBanner(betaUpdateState, onCheckBeta, onUpdate)
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
+        }
+    }
+}
+
+@Composable private fun BetaUpdateBanner(state: UpdateState?, onCheck: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+    when (state) {
+        null -> OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("使用最新测试版") }
+        UpdateState.Checking -> Text("正在检查最新测试版…", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+        UpdateState.UpToDate -> Text("暂无可安装的更新测试版", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Failed -> Text("无法检查测试版：${state.reason}", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Available -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2D8))) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("发现测试版 ${state.update.version}", fontWeight = FontWeight.Bold)
+                    Text("测试版需由你主动选择安装", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(onClick = { onUpdate(state.update) }) { Text("安装测试版") }
+            }
         }
     }
 }

@@ -68,11 +68,20 @@ jobs:
           REPOSITORY: ${{ github.repository }}
         run: |
           VERSION="${TAG#android-v}"
-          cat > android-update.json <<EOF
+          if [[ "$VERSION" == *-* ]]; then
+            MANIFEST_TAG="android-beta-update"
+            MANIFEST_FILE="android-beta-update.json"
+            MANIFEST_TITLE="LexiNote Android beta update manifest"
+          else
+            MANIFEST_TAG="android-update"
+            MANIFEST_FILE="android-update.json"
+            MANIFEST_TITLE="LexiNote Android update manifest"
+          fi
+          cat > "$MANIFEST_FILE" <<EOF
           {"version":"${VERSION}","apkUrl":"https://github.com/${REPOSITORY}/releases/download/${TAG}/lexinote-${VERSION}.apk"}
           EOF
-          if gh release view android-update >/dev/null 2>&1; then
-            gh release upload android-update android-update.json --clobber
+          if gh release view "$MANIFEST_TAG" >/dev/null 2>&1; then
+            gh release upload "$MANIFEST_TAG" "$MANIFEST_FILE" --clobber
           else
-            gh release create android-update android-update.json --title "LexiNote Android update manifest" --notes "Machine-readable Android update manifest." --latest=false
+            gh release create "$MANIFEST_TAG" "$MANIFEST_FILE" --title "$MANIFEST_TITLE" --notes "Machine-readable Android update manifest." --latest=false
           fi

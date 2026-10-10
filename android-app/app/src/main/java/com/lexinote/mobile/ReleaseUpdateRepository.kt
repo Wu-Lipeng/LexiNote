@@ -18,6 +18,11 @@ import java.net.URL
 
 data class UpdateInfo(val version: String, val downloadUrl: String, val fileName: String)
 
+enum class UpdateChannel(val manifestReleaseTag: String, val manifestFileName: String) {
+    STABLE("android-update", "android-update.json"),
+    BETA("android-beta-update", "android-beta-update.json")
+}
+
 sealed interface UpdateState {
     data object Checking : UpdateState
     data object UpToDate : UpdateState
@@ -30,8 +35,8 @@ sealed interface UpdateState {
 object ReleaseUpdateRepository {
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun checkForUpdate(repository: String): UpdateInfo? = withContext(Dispatchers.IO) {
-        val connection = URL("https://github.com/$repository/releases/download/android-update/android-update.json").openConnection() as HttpURLConnection
+    suspend fun checkForUpdate(repository: String, channel: UpdateChannel = UpdateChannel.STABLE): UpdateInfo? = withContext(Dispatchers.IO) {
+        val connection = URL("https://github.com/$repository/releases/download/${channel.manifestReleaseTag}/${channel.manifestFileName}").openConnection() as HttpURLConnection
         try {
             connection.connectTimeout = 12_000
             connection.readTimeout = 12_000
