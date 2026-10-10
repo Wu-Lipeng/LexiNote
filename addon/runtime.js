@@ -74,7 +74,51 @@ var LexiNoteRuntime = class {
     else if (Services.logins.addLoginAsync) await Services.logins.addLoginAsync(login);
     else Services.logins.addLogin(login);
   }
-  async saveConfig(input, key) {
+  nutstoreCredentialNames() {
+    return { username: "Nutstore WebDAV Username", password: "Nutstore WebDAV Password" };
+  }
+  nutstoreCredentials() {
+    const names = this.nutstoreCredentialNames();
+    return { username: this.getCredential(names.username), password: this.getCredential(names.password) };
+  }
+  nutstoreConfig(config = this.config) {
+    const serverUrl = String(config.nutstoreServerUrl || "").trim();
+    if (!serverUrl) return { serverUrl, enabled: false };
+    let url;
+    try { url = new URL(serverUrl); } catch (_) { throw new Error("坚果云 WebDAV 地址格式不正确。"); }
+    if (url.protocol !== "https:" || url.username || url.password || url.hash) throw new Error("坚果云 WebDAV 地址必须是 HTTPS，且不能包含账号、密码或 # 片段。");
+    return { serverUrl: url.href.endsWith("/") ? url.href : url.href + "/", enabled: Boolean(config.nutstoreEnabled) };
+  }
+  isNutstoreConfigured(config = this.config) {
+    try {
+      const settings = this.nutstoreConfig(config);
+      const credentials = this.nutstoreCredentials();
+      return settings.enabled && Boolean(credentials.username && credentials.password);
+    } catch (_) { return false; }
+  }
+  nutstoreFilename(value) {
+    const filename = String(value || "").trim();
+    if (!/^[^\\/\\\\\u0000-\u001F]+\.json$/i.test(filename) || filename === ".json") throw new Error("同步文件名必须是不含路径的 .json 文件名。");
+    return filename;
+  }
+  nutstoreFolderUrl(config = this.config) {
+    const settings = this.nutstoreConfig(config);
+    return new URL("LexiNote/", settings.serverUrl).href;
+  }
+  nutstoreFileUrl(filename, config = this.config) {
+    return new URL(encodeURIComponent(this.nutstoreFilename(filename)), this.nutstoreFolderUrl(config)).href;
+  }
+  async ensureNutstoreFolder(credentials) {
+    const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
+    try {
+      await Zotero.HTTP.request("MKCOL", this.nutstoreFolderUrl(), { headers: { "Authorization": `Basic ${auth}` }, timeout: 30000 });
+    } catch (error) {
+      const status = error?.status || error?.xmlhttp?.status;
+      // WebDAV returns 405 when the collection already exists.
+      if (status !== 405) throw error;
+    }
+  }
+  async saveConfig(input, key, nutstoreUsername, nutstorePassword) {
     const config = LexiNoteCore.validate(input, !input.enabled);
     // Keep newly entered Baidu credentials available for this running Zotero
     // session. The separately persisted preference below deliberately omits
@@ -88,6 +132,13 @@ var LexiNoteRuntime = class {
     } else if (!baidu) {
       await this.setKey(key);
     }
+    const nutstore = this.nutstoreConfig(config);
+    const nutstoreNames = this.nutstoreCredentialNames();
+    if (nutstoreUsername !== undefined && nutstorePassword !== undefined) {
+      await this.setCredential(nutstoreNames.username, nutstoreUsername || "");
+      await this.setCredential(nutstoreNames.password, nutstorePassword || "");
+    }
+    config.nutstoreServerUrl = nutstore.serverUrl || LexiNoteCore.defaults.nutstoreServerUrl;
     // Credentials belong exclusively in Zotero's login manager, never in the
     // JSON preference that stores the rest of the add-on configuration.
     config.baiduApiKey = "";
@@ -853,6 +904,63 @@ var LexiNoteRuntime = class {
     const wordbook = await this.exportWordbook(parent);
     await Zotero.File.putContentsAsync(picker.file, JSON.stringify(wordbook, null, 2) + "\n");
     return { entries: wordbook.entries.length, path: picker.file.path };
+  }
+  async promptNutstoreFilename(window) {
+    const parent = await this.exportParentItem();
+    const input = { value: this.wordbookFilename(parent) };
+    if (!Services.prompt.prompt(window, "同步当前词库到坚果云", "请输入本篇文章的同步文件名（.json）：", input, null, {})) throw new Error("已取消坚果云同步。");
+    return this.nutstoreFilename(input.value);
+  }
+  async savedNutstoreFilename(parent) {
+    const values = new Set();
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag?.(this.tag)) continue;
+      const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      const filename = String(root.dataset.lexinoteNutstoreFilename || "").trim();
+      if (filename) values.add(this.nutstoreFilename(filename));
+    }
+    if (values.size > 1) throw new Error("当前文献的多个 LexiNote 生词本记录了不同的坚果云文件名，请先整理生词本后再同步。");
+    return [...values][0] || "";
+  }
+  async saveNutstoreFilename(parent, filename) {
+    const safeFilename = this.nutstoreFilename(filename);
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    let saved = 0;
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag?.(this.tag) || !note.isEditable?.()) continue;
+      const document = new DOMParser().parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      root.dataset.lexinoteNutstoreFilename = safeFilename;
+      note.setNote(document.body.innerHTML);
+      await note.saveTx();
+      saved++;
+    }
+    if (!saved) throw new Error("同步完成，但未能将文件名写回可编辑的 LexiNote 生词本。");
+    return safeFilename;
+  }
+  async syncCurrentWordbookToNutstore(filename) {
+    if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
+    const parent = await this.exportParentItem();
+    const wordbook = await this.exportWordbook(parent);
+    const credentials = this.nutstoreCredentials();
+    const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
+    const url = this.nutstoreFileUrl(filename);
+    try {
+      await this.ensureNutstoreFolder(credentials);
+      await Zotero.HTTP.request("PUT", url, {
+        body: JSON.stringify(wordbook, null, 2) + "\n",
+        headers: { "Authorization": `Basic ${auth}`, "Content-Type": "application/json; charset=utf-8" },
+        timeout: 30000
+      });
+    } catch (error) {
+      const status = error?.status || error?.xmlhttp?.status;
+      if (status === 401 || status === 403) throw new Error("坚果云拒绝访问，请检查账号与第三方应用密码。");
+      throw new Error(`同步到坚果云失败：${error?.message || "网络请求失败"}`);
+    }
+    await this.saveNutstoreFilename(parent, filename);
+    return { entries: wordbook.entries.length, url, filename };
   }
   updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex, annotationID = "", replaceOriginalWord = false) {
     const before = document.body.innerHTML;

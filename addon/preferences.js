@@ -4,7 +4,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     const app = Zotero.LexiNote;
     if (!app || $("settings").dataset.initialized) return;
     $("settings").dataset.initialized = "true";
-    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType"];
+    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType", "nutstoreServerUrl"];
     for (const name of names) $(name).value = app.config[name];
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
@@ -12,6 +12,12 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("autoLocateSavedWord").checked = Boolean(app.config.autoLocateSavedWord);
     $("noteLocateMode").value = app.config.noteLocateMode || "select";
     $("showNoteLocateStatus").checked = Boolean(app.config.showNoteLocateStatus);
+    $("nutstoreEnabled").checked = Boolean(app.config.nutstoreEnabled);
+    const nutstoreCredentials = app.nutstoreCredentials();
+    $("nutstoreUsername").value = nutstoreCredentials.username;
+    $("nutstorePassword").value = nutstoreCredentials.password;
+    const updateNutstoreAvailability = () => { $("syncWordbook").disabled = !app.isNutstoreConfigured(); };
+    updateNutstoreAvailability();
     const baiduDrafts = {};
     let dirty = false;
     let previousProvider = $("provider").value;
@@ -40,7 +46,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     try { $("key").value = app.getKey(); }
     catch (_) { $("status").textContent = "无法读取凭据存储，请解锁后重新打开设置。"; $("save").disabled = true; }
     const read = () => {
-      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value, showNoteLocateStatus: $("showNoteLocateStatus").checked };
+      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value, showNoteLocateStatus: $("showNoteLocateStatus").checked, nutstoreEnabled: $("nutstoreEnabled").checked };
       for (const name of names) config[name] = ["delay", "timeout"].includes(name) ? Number($(name).value) : $(name).value;
       config.baiduApiKey = $("baiduApiKey").value.trim(); config.baiduSecretKey = $("baiduSecretKey").value.trim();
       config.useBaiduTrial = $("useBaiduTrial").checked;
@@ -69,8 +75,9 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("save").disabled = true;
       try {
         const config = read();
-        await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value);
+        await app.saveConfig(config, ["baidu", "baidu-general"].includes(config.provider) ? $("baiduApiKey").value.trim() : $("key").value, $("nutstoreUsername").value.trim(), $("nutstorePassword").value);
         dirty = false;
+        updateNutstoreAvailability();
         $("status").textContent = "设置已保存，立即生效。";
         return true;
       }
@@ -106,6 +113,16 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       } finally {
         $("exportWordbook").disabled = false;
       }
+    });
+    $("syncWordbook").addEventListener("click", async () => {
+      $("syncWordbook").disabled = true;
+      try {
+        $("status").textContent = "正在同步当前词库到坚果云…";
+        const filename = await app.savedNutstoreFilename(await app.exportParentItem()) || await app.promptNutstoreFilename(window);
+        const result = await app.syncCurrentWordbookToNutstore(filename);
+        $("status").textContent = `已同步 ${result.entries} 个词条到坚果云：\n${result.filename}\n${result.url}`;
+      } catch (e) { $("status").textContent = e.message || "坚果云同步失败。"; }
+      finally { updateNutstoreAvailability(); }
     });
     $("diagnoseSourceSentences").addEventListener("click", async () => {
       $("diagnoseSourceSentences").disabled = true;
@@ -222,7 +239,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
-    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
+    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "nutstoreEnabled", "nutstoreUsername", "nutstorePassword", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
     for (const id of settingControls) {
       $(id).addEventListener("input", () => { dirty = true; });
       $(id).addEventListener("change", () => { dirty = true; });
