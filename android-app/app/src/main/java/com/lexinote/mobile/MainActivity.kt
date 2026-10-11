@@ -56,6 +56,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     var books by remember { mutableStateOf(repo.loadBooks()) }
     var studyScope by remember { mutableStateOf(studyScopeRepository.load()) }
     var page by remember { mutableStateOf(Page.HOME) }
+    var reviewMode by remember { mutableStateOf(ReviewMode.DUE) }
     var selected by remember { mutableStateOf<WordEntry?>(null) }
     var selectedBook by remember { mutableStateOf<StoredWordbook?>(null) }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
@@ -127,8 +128,18 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         }
     }
     when (page) {
-        Page.HOME -> Home(scopedEntries, updateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }, installUpdate)
-        Page.REVIEW -> ReviewPage(scopedEntries, onBack = { page = Page.HOME }) { entry, grade ->
+        Page.HOME -> Home(
+            entries = scopedEntries,
+            updateState = updateState,
+            syncMessage = syncMessage,
+            onImport = importFile,
+            onReview = { reviewMode = ReviewMode.DUE; page = Page.REVIEW },
+            onReviewAll = { reviewMode = ReviewMode.ALL; page = Page.REVIEW },
+            onLibrary = { page = Page.LIBRARY },
+            onSettings = { page = Page.SETTINGS },
+            onUpdate = installUpdate
+        )
+        Page.REVIEW -> ReviewPage(scopedEntries, reviewMode, onBack = { page = Page.HOME }) { entry, grade ->
             val updatedReview = ReviewScheduler.schedule(entry.review, grade)
             repo.updateReview(entry.id, updatedReview)
             entries = repo.load()
@@ -152,7 +163,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
     Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "设置") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -164,6 +175,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             UpdateBanner(updateState, onUpdate)
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
+            OutlinedButton(onClick = onReviewAll, Modifier.fillMaxWidth(), enabled = entries.isNotEmpty()) { Text("全部复习") }
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
         }
@@ -276,11 +288,11 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun ReviewPage(entries: List<WordEntry>, onBack: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
-    val card = entries.firstOrNull { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
-    val sessionTotal = remember { entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() } }
-    val remaining = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
-    val completed = (sessionTotal - remaining).coerceAtLeast(0)
+@Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, onBack: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
+    var queueIds by remember(mode) { mutableStateOf(ReviewSession.shuffledIds(entries, mode)) }
+    val sessionTotal = remember(mode) { queueIds.size }
+    val card = queueIds.firstOrNull()?.let { id -> entries.firstOrNull { it.id == id } }
+    val completed = (sessionTotal - queueIds.size).coerceAtLeast(0)
     val progress = if (sessionTotal == 0) 1f else completed.toFloat() / sessionTotal
     var reveal by remember(card?.id) { mutableStateOf(false) }
     Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
@@ -288,7 +300,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
                 Spacer(Modifier.weight(1f))
-                Text("今日复习", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text(mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.weight(1f))
                 Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
             }
@@ -296,7 +308,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(7.dp), color = Color(0xFF3B8F72), trackColor = Color(0xFFE0E7DE))
             Spacer(Modifier.height(24.dp))
             if (card == null) CompletedReview(onBack)
-            else StudyCard(card, reveal, { reveal = true }, onGrade)
+            else StudyCard(card, reveal, { reveal = true }) { entry, grade ->
+                queueIds = queueIds.drop(1)
+                onGrade(entry, grade)
+            }
         }
     }
 }
