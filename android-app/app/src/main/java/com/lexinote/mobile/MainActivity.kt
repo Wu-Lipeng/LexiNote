@@ -18,6 +18,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Refresh
@@ -290,9 +291,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
 
 @Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, onBack: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
     var queueIds by remember(mode) { mutableStateOf(ReviewSession.shuffledIds(entries, mode)) }
-    val sessionTotal = remember(mode) { queueIds.size }
-    val card = queueIds.firstOrNull()?.let { id -> entries.firstOrNull { it.id == id } }
-    val completed = (sessionTotal - queueIds.size).coerceAtLeast(0)
+    var reviewProgress by remember(mode) { mutableStateOf(ReviewProgress()) }
+    val sessionTotal = queueIds.size
+    val card = queueIds.getOrNull(reviewProgress.currentIndex)?.let { id -> entries.firstOrNull { it.id == id } }
+    val completed = reviewProgress.reviewedIndices.size
     val progress = if (sessionTotal == 0) 1f else completed.toFloat() / sessionTotal
     var reveal by remember(card?.id) { mutableStateOf(false) }
     Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
@@ -300,7 +302,13 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
                 Spacer(Modifier.weight(1f))
+                IconButton(onClick = { reviewProgress = reviewProgress.goBack() }, enabled = reviewProgress.canGoBack()) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一个单词")
+                }
                 Text(mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
+                }
                 Spacer(Modifier.weight(1f))
                 Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
             }
@@ -309,7 +317,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             Spacer(Modifier.height(24.dp))
             if (card == null) CompletedReview(onBack)
             else StudyCard(card, reveal, { reveal = true }) { entry, grade ->
-                queueIds = queueIds.drop(1)
+                reviewProgress = reviewProgress.gradeCurrent(sessionTotal)
                 onGrade(entry, grade)
             }
         }

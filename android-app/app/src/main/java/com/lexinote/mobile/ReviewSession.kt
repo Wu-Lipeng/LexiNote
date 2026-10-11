@@ -5,6 +5,35 @@ enum class ReviewMode(val title: String) {
     ALL("全部复习")
 }
 
+/** Keeps navigation within the part of a shuffled session the learner has reached. */
+data class ReviewProgress(
+    val currentIndex: Int = 0,
+    val reviewedIndices: Set<Int> = emptySet()
+) {
+    fun canGoBack(): Boolean = currentIndex > 0
+
+    fun canGoForward(queueSize: Int): Boolean = currentIndex < lastReachableIndex(queueSize)
+
+    fun goBack(): ReviewProgress = if (canGoBack()) copy(currentIndex = currentIndex - 1) else this
+
+    fun goForward(queueSize: Int): ReviewProgress =
+        if (canGoForward(queueSize)) copy(currentIndex = currentIndex + 1) else this
+
+    fun gradeCurrent(queueSize: Int): ReviewProgress {
+        if (queueSize == 0) return this
+
+        val updatedReviewed = reviewedIndices + currentIndex
+        return if (currentIndex !in reviewedIndices && currentIndex < queueSize - 1) {
+            copy(currentIndex = currentIndex + 1, reviewedIndices = updatedReviewed)
+        } else {
+            copy(reviewedIndices = updatedReviewed)
+        }
+    }
+
+    private fun lastReachableIndex(queueSize: Int): Int =
+        ((reviewedIndices.maxOrNull() ?: -1) + 1).coerceIn(0, (queueSize - 1).coerceAtLeast(0))
+}
+
 object ReviewSession {
     fun candidates(entries: List<WordEntry>, mode: ReviewMode, now: Long = System.currentTimeMillis()): List<WordEntry> =
         when (mode) {

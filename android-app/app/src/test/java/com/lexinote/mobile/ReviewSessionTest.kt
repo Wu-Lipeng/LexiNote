@@ -1,6 +1,8 @@
 package com.lexinote.mobile
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ReviewSessionTest {
@@ -18,5 +20,26 @@ class ReviewSessionTest {
     @Test fun `all review includes every scoped word once`() {
         val ids = ReviewSession.shuffledIds(entries, ReviewMode.ALL, now) { it.reversed() }
         assertEquals(listOf("new", "future", "due"), ids)
+    }
+
+    @Test fun `navigation only reaches the reviewed frontier`() {
+        var progress = ReviewProgress()
+
+        assertFalse(progress.canGoBack())
+        assertFalse(progress.canGoForward(3))
+
+        progress = progress.gradeCurrent(3)
+        assertEquals(1, progress.currentIndex)
+        assertTrue(progress.canGoBack())
+        assertFalse(progress.canGoForward(3))
+
+        progress = progress.goBack()
+        assertEquals(0, progress.currentIndex)
+        assertTrue(progress.canGoForward(3))
+
+        progress = progress.goForward(3).gradeCurrent(3).gradeCurrent(3)
+        assertEquals(2, progress.currentIndex)
+        assertFalse(progress.canGoForward(3))
+        assertTrue(progress.canGoBack())
     }
 }
