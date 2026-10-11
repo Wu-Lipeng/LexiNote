@@ -310,25 +310,30 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     val card = queueIds.getOrNull(reviewProgress.currentIndex)?.let { id -> entries.firstOrNull { it.id == id } }
     val completed = reviewProgress.reviewedIndices.size
     val progress = if (sessionTotal == 0) 1f else completed.toFloat() / sessionTotal
+    val finished = reviewProgress.isComplete(sessionTotal)
     var reveal by remember(card?.id) { mutableStateOf(false) }
     Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp, vertical = 14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
                 Spacer(Modifier.weight(1f))
-                IconButton(onClick = { reviewProgress = reviewProgress.goBack() }, enabled = reviewProgress.canGoBack()) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一个单词")
-                }
-                Text(mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
-                }
-                IconButton(onClick = { card?.let { onMarkedChanged(it, !it.marked) } }, enabled = card != null) {
-                    Icon(
-                        imageVector = if (card?.marked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                        contentDescription = if (card?.marked == true) "取消标记" else "标记单词",
-                        tint = if (card?.marked == true) Color(0xFFE0A12D) else LocalContentColor.current
-                    )
+                if (finished) {
+                    Text("本轮完成", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                } else {
+                    IconButton(onClick = { reviewProgress = reviewProgress.goBack() }, enabled = reviewProgress.canGoBack()) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一个单词")
+                    }
+                    Text(mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
+                    }
+                    IconButton(onClick = { card?.let { onMarkedChanged(it, !it.marked) } }, enabled = card != null) {
+                        Icon(
+                            imageVector = if (card?.marked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = if (card?.marked == true) "取消标记" else "标记单词",
+                            tint = if (card?.marked == true) Color(0xFFE0A12D) else LocalContentColor.current
+                        )
+                    }
                 }
                 Spacer(Modifier.weight(1f))
                 Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
@@ -336,7 +341,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(7.dp), color = Color(0xFF3B8F72), trackColor = Color(0xFFE0E7DE))
             Spacer(Modifier.height(24.dp))
-            if (card == null) CompletedReview(onBack)
+            if (card == null || finished) CompletedReview(mode, sessionTotal, onBack)
             else StudyCard(card, mode, reveal, { reveal = true }) { entry, grade, marked ->
                 reviewProgress = reviewProgress.gradeCurrent(sessionTotal)
                 onGrade(entry, grade, marked)
@@ -391,9 +396,9 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun CompletedReview(onBack: () -> Unit) = Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-    Text("今日完成", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-    Text("每一次回忆，都会让知识更牢固。", modifier = Modifier.padding(top = 12.dp), color = Color(0xFF6B706C))
+@Composable private fun CompletedReview(mode: ReviewMode, completed: Int, onBack: () -> Unit) = Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Text(if (mode == ReviewMode.MARKED) "标记复习完成" else "本轮复习完成", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+    Text(if (mode == ReviewMode.MARKED) "已完成 $completed 个标记词复习。" else "每一次回忆，都会让知识更牢固。", modifier = Modifier.padding(top = 12.dp), color = Color(0xFF6B706C))
     Button(onClick = onBack, modifier = Modifier.padding(top = 28.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("返回首页") }
 }
 

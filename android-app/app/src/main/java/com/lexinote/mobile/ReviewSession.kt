@@ -15,6 +15,8 @@ data class ReviewProgress(
 
     fun canGoForward(queueSize: Int): Boolean = currentIndex < lastReachableIndex(queueSize)
 
+    fun isComplete(queueSize: Int): Boolean = queueSize > 0 && reviewedIndices.size >= queueSize
+
     fun goBack(): ReviewProgress = if (canGoBack()) copy(currentIndex = currentIndex - 1) else this
 
     fun goForward(queueSize: Int): ReviewProgress =

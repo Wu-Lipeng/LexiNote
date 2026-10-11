@@ -45,5 +45,6 @@ class ReviewSessionTest {
         assertEquals(2, progress.currentIndex)
         assertFalse(progress.canGoForward(3))
         assertTrue(progress.canGoBack())
+        assertTrue(progress.isComplete(3))
     }
 }
