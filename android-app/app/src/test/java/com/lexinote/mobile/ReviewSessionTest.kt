@@ -10,7 +10,7 @@ class ReviewSessionTest {
     private val entries = listOf(
         WordEntry("due", "due", review = Review(nextReviewAt = now)),
         WordEntry("future", "future", review = Review(nextReviewAt = now + 1)),
-        WordEntry("new", "new")
+        WordEntry("new", "new", marked = true)
     )
 
     @Test fun `due review excludes future words`() {
@@ -20,6 +20,10 @@ class ReviewSessionTest {
     @Test fun `all review includes every scoped word once`() {
         val ids = ReviewSession.shuffledIds(entries, ReviewMode.ALL, now) { it.reversed() }
         assertEquals(listOf("new", "future", "due"), ids)
+    }
+
+    @Test fun `marked review only includes marked words`() {
+        assertEquals(listOf("new"), ReviewSession.candidates(entries, ReviewMode.MARKED, now).map { it.id })
     }
 
     @Test fun `navigation only reaches the reviewed frontier`() {

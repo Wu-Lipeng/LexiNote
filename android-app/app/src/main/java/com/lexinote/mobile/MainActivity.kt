@@ -19,6 +19,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Refresh
@@ -136,13 +138,23 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             onImport = importFile,
             onReview = { reviewMode = ReviewMode.DUE; page = Page.REVIEW },
             onReviewAll = { reviewMode = ReviewMode.ALL; page = Page.REVIEW },
+            onReviewMarked = { reviewMode = ReviewMode.MARKED; page = Page.REVIEW },
             onLibrary = { page = Page.LIBRARY },
             onSettings = { page = Page.SETTINGS },
             onUpdate = installUpdate
         )
-        Page.REVIEW -> ReviewPage(scopedEntries, reviewMode, onBack = { page = Page.HOME }) { entry, grade ->
+        Page.REVIEW -> ReviewPage(
+            entries = scopedEntries,
+            mode = reviewMode,
+            onBack = { page = Page.HOME },
+            onMarkedChanged = { entry, marked ->
+                repo.updateMarked(entry.id, marked)
+                entries = repo.load()
+                books = repo.loadBooks()
+            }
+        ) { entry, grade, marked ->
             val updatedReview = ReviewScheduler.schedule(entry.review, grade)
-            repo.updateReview(entry.id, updatedReview)
+            repo.updateStudyState(entry.id, updatedReview, marked)
             entries = repo.load()
             books = repo.loadBooks()
         }
@@ -164,8 +176,9 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
+    val marked = entries.count { it.marked }
     Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "设置") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("把 Zotero 生词本带在身边", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -177,6 +190,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
             OutlinedButton(onClick = onReviewAll, Modifier.fillMaxWidth(), enabled = entries.isNotEmpty()) { Text("全部复习") }
+            OutlinedButton(onClick = onReviewMarked, Modifier.fillMaxWidth(), enabled = marked > 0) { Icon(Icons.Default.Bookmark, null); Spacer(Modifier.width(8.dp)); Text("复习标记单词（$marked）") }
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
         }
@@ -289,7 +303,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, onBack: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
+@Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, onBack: () -> Unit, onMarkedChanged: (WordEntry, Boolean) -> Unit, onGrade: (WordEntry, Int, Boolean?) -> Unit) {
     var queueIds by remember(mode) { mutableStateOf(ReviewSession.shuffledIds(entries, mode)) }
     var reviewProgress by remember(mode) { mutableStateOf(ReviewProgress()) }
     val sessionTotal = queueIds.size
@@ -309,6 +323,13 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
                     Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
                 }
+                IconButton(onClick = { card?.let { onMarkedChanged(it, !it.marked) } }, enabled = card != null) {
+                    Icon(
+                        imageVector = if (card?.marked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = if (card?.marked == true) "取消标记" else "标记单词",
+                        tint = if (card?.marked == true) Color(0xFFE0A12D) else LocalContentColor.current
+                    )
+                }
                 Spacer(Modifier.weight(1f))
                 Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
             }
@@ -316,15 +337,15 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(7.dp), color = Color(0xFF3B8F72), trackColor = Color(0xFFE0E7DE))
             Spacer(Modifier.height(24.dp))
             if (card == null) CompletedReview(onBack)
-            else StudyCard(card, reveal, { reveal = true }) { entry, grade ->
+            else StudyCard(card, mode, reveal, { reveal = true }) { entry, grade, marked ->
                 reviewProgress = reviewProgress.gradeCurrent(sessionTotal)
-                onGrade(entry, grade)
+                onGrade(entry, grade, marked)
             }
         }
     }
 }
 
-@Composable private fun StudyCard(card: WordEntry, reveal: Boolean, onReveal: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
+@Composable private fun StudyCard(card: WordEntry, mode: ReviewMode, reveal: Boolean, onReveal: () -> Unit, onGrade: (WordEntry, Int, Boolean?) -> Unit) {
     val cardShape = RoundedCornerShape(28.dp)
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
@@ -358,8 +379,13 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         Spacer(Modifier.height(18.dp))
         if (!reveal) Button(onClick = onReveal, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("查看释义", fontWeight = FontWeight.Bold) }
         else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { onGrade(card, 0) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE09372)), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC75A35))) { Text("再记一次\n明天复习", textAlign = TextAlign.Center) }
-            Button(onClick = { onGrade(card, 2) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("认识了\n间隔复习", textAlign = TextAlign.Center) }
+            val markedReview = mode == ReviewMode.MARKED
+            OutlinedButton(onClick = { onGrade(card, 0, if (markedReview) true else null) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE09372)), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC75A35))) {
+                Text(if (markedReview) "不认识\n保留标记" else "再记一次\n明天复习", textAlign = TextAlign.Center)
+            }
+            Button(onClick = { onGrade(card, 2, if (markedReview) false else null) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) {
+                Text(if (markedReview) "认识\n取消标记" else "认识了\n间隔复习", textAlign = TextAlign.Center)
+            }
         }
         Spacer(Modifier.height(10.dp))
     }

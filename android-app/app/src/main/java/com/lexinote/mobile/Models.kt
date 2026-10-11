@@ -23,6 +23,7 @@ import kotlinx.serialization.Serializable
     val createdAt: String? = null,
     val savedDate: String? = null,
     val review: Review = Review(),
+    val marked: Boolean = false,
     val tags: List<String> = emptyList()
 )
 @Serializable data class Source(val title: String = "", val pageLabel: String? = null, val url: String? = null)

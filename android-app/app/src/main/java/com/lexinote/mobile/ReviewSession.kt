@@ -2,7 +2,8 @@ package com.lexinote.mobile
 
 enum class ReviewMode(val title: String) {
     DUE("今日复习"),
-    ALL("全部复习")
+    ALL("全部复习"),
+    MARKED("标记复习")
 }
 
 /** Keeps navigation within the part of a shuffled session the learner has reached. */
@@ -39,6 +40,7 @@ object ReviewSession {
         when (mode) {
             ReviewMode.DUE -> entries.filter { it.review.nextReviewAt == null || it.review.nextReviewAt <= now }
             ReviewMode.ALL -> entries
+            ReviewMode.MARKED -> entries.filter { it.marked }
         }
 
     fun shuffledIds(
