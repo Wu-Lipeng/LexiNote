@@ -4,11 +4,26 @@ import android.content.Context
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.net.HttpURLConnection
 import java.net.URLDecoder
 import java.net.URL
-import org.xmlpull.v1.XmlPullParser
-import org.xmlpull.v1.XmlPullParserFactory
+import java.util.concurrent.TimeUnit
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+
+internal fun parseWebDavHrefs(xml: String): List<String> {
+    val href = Regex("""<(?:[A-Za-z][\w.-]*:)?href(?:\s[^>]*)?>(.*?)</(?:[A-Za-z][\w.-]*:)?href\s*>""", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+    return href.findAll(xml).map { match ->
+        match.groupValues[1].trim()
+            .replace("&amp;", "&")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+    }.toList()
+}
 
 data class NutstoreConfig(
     val serverUrl: String = DEFAULT_SERVER_URL,
@@ -56,56 +71,53 @@ class NutstoreSettingsRepository(context: Context) {
 object NutstoreWebDavRepository {
     data class RemoteWordbook(val filename: String, val content: String)
 
+    // HttpURLConnection rejects WebDAV methods such as PROPFIND on Android.
+    // OkHttp accepts custom methods and keeps the request within the normal TLS stack.
+    private val client = OkHttpClient.Builder()
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .build()
+
     private fun authorization(config: NutstoreConfig): String {
         val credentials = "${config.username}:${config.password}"
         return "Basic ${Base64.encodeToString(credentials.toByteArray(Charsets.UTF_8), Base64.NO_WRAP)}"
     }
 
-    private fun open(config: NutstoreConfig, url: URL, method: String): HttpURLConnection = (url.openConnection() as HttpURLConnection).apply {
-        requestMethod = method; connectTimeout = 12_000; readTimeout = 20_000
-        setRequestProperty("Authorization", authorization(config))
+    private fun request(config: NutstoreConfig, url: URL, method: String, body: RequestBody? = null): Request = Request.Builder()
+        .url(url)
+        .header("Authorization", authorization(config))
+        .method(method, body)
+        .build()
+
+    private fun webDavFailure(status: Int, action: String): Nothing = when (status) {
+        401 -> throw IllegalStateException("坚果云身份验证失败（HTTP 401）：请检查 App 中保存的账号邮箱和第三方应用密码是否与插件一致")
+        403 -> throw IllegalStateException("坚果云拒绝$action（HTTP 403）：账号已到达服务器，但没有读取 LexiNote 文件夹的权限")
+        404 -> throw IllegalStateException("坚果云中尚未创建 LexiNote 文件夹（HTTP 404）：请先在插件中同步一篇文章")
+        else -> throw IllegalStateException("坚果云${action}失败（HTTP $status）")
     }
 
     suspend fun downloadWordbooks(config: NutstoreConfig): List<RemoteWordbook> = withContext(Dispatchers.IO) {
         require(config.isConfigured()) { "请先填写完整的坚果云 WebDAV 设置" }
         val folder = config.remoteFolderUrl()
-        val connection = open(config, folder, "PROPFIND")
-        try {
-            connection.setRequestProperty("Depth", "1")
-            connection.setRequestProperty("Content-Type", "text/xml; charset=utf-8")
-            connection.doOutput = true
-            connection.outputStream.bufferedWriter(Charsets.UTF_8).use { it.write("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>") }
-            when (connection.responseCode) {
-                207 -> parseHrefs(connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() })
+        val xml = "<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/></d:prop></d:propfind>"
+        val body = xml.toRequestBody("text/xml; charset=utf-8".toMediaType())
+        val request = request(config, folder, "PROPFIND", body).newBuilder().header("Depth", "1").build()
+        client.newCall(request).execute().use { response ->
+            when (response.code) {
+                207 -> parseWebDavHrefs(response.body?.string().orEmpty())
                     .mapNotNull { href -> remoteJsonUrl(folder, href) }
                     .distinctBy { it.toString() }
                     .map { url -> RemoteWordbook(filename(url), download(config, url)) }
-                HttpURLConnection.HTTP_UNAUTHORIZED, HttpURLConnection.HTTP_FORBIDDEN -> throw IllegalStateException("坚果云拒绝访问，请检查账号与第三方应用密码")
-                HttpURLConnection.HTTP_NOT_FOUND -> throw IllegalStateException("坚果云中尚未创建 LexiNote 文件夹，请先在插件中同步一篇文章")
-                else -> throw IllegalStateException("坚果云返回 HTTP ${connection.responseCode}")
+                else -> webDavFailure(response.code, "读取 LexiNote 文件夹")
             }
-        } finally {
-            connection.disconnect()
         }
     }
 
     private fun download(config: NutstoreConfig, url: URL): String {
-        val connection = open(config, url, "GET")
-        try {
-            check(connection.responseCode in 200..299) { "下载 ${filename(url)} 时返回 HTTP ${connection.responseCode}" }
-            return connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        } finally { connection.disconnect() }
-    }
-
-    private fun parseHrefs(xml: String): List<String> {
-        val parser = XmlPullParserFactory.newInstance().newPullParser()
-        parser.setInput(xml.reader())
-        val values = mutableListOf<String>()
-        while (parser.eventType != XmlPullParser.END_DOCUMENT) {
-            if (parser.eventType == XmlPullParser.START_TAG && parser.name.equals("href", true)) values += parser.nextText()
-            parser.next()
+        client.newCall(request(config, url, "GET")).execute().use { response ->
+            if (response.code !in 200..299) webDavFailure(response.code, "下载 ${filename(url)}")
+            return response.body?.string().orEmpty()
         }
-        return values
     }
 
     private fun remoteJsonUrl(folder: URL, href: String): URL? = runCatching {

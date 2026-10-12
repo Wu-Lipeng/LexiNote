@@ -26,7 +26,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       let pref='{}';
       const openedNotes=[];const scrollBox={scrollHeight:321,scrollTop:0};let locatedHeading=false;
       const savedHeading={dataset:{lexinoteWord:'alpha'},textContent:'alpha',scrollIntoView:options=>{locatedHeading=options.block==='center';}};
-      const sideDocument={querySelector:s=>s==='.editor-core'?scrollBox:null,querySelectorAll:s=>s==='h3'?[savedHeading]:[]};
+      const sideDocument={querySelector:s=>s==='.editor-core'?scrollBox:null,querySelectorAll:s=>s==='h3'?[savedHeading]:[],addEventListener:()=>{},removeEventListener:()=>{}};
       const sideEditor={focus:async()=>{},getCurrentInstance:()=>({_iframeWindow:{document:sideDocument}})};
       const notesContext={_setPinnedNote:note=>openedNotes.push(note.id),_getCurrentEditor:()=>sideEditor};
       const context={mode:'item',_getNotesContext:()=>notesContext};const contextPane={collapsed:true,context};
@@ -84,9 +84,10 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const old=popup;app.selection(event('epsilon'));popup=document.querySelector('.lexinote-popup');check(!old.isConnected,'New selection removes old popup');
       await new Promise(r=>setTimeout(r,180));popup.remove();await new Promise(r=>setTimeout(r,10));check(app.popups.size===0,'Disconnected popup cleans up');
       note.deleted=true;const replacement=await app.saveWord(entry('zeta'));check(replacement.noteID!==note.id,'Trashed note is not reused');
+      app.stop();
       return results;
     });
-    assert.equal(results.length,20);
+    assert.equal(results.length,23);
     const markup=fs.readFileSync(path.resolve(__dirname,'../addon/preferences.xhtml'),'utf8');
     await page.evaluate(markup=>{
       const parsed=new DOMParser().parseFromString(markup,'application/xml');

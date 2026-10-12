@@ -23,7 +23,13 @@ class WordbookRepository(context: Context) {
         val books = loadBooks().toMutableList()
         val index = books.indexOfFirst { it.id == bookId }
         val existing = (if (index >= 0) books[index].entries else emptyList()).associateBy { it.id }.toMutableMap()
-        file.entries.forEach { incoming -> existing[incoming.id] = incoming.copy(review = existing[incoming.id]?.review ?: incoming.review) }
+        file.entries.forEach { incoming ->
+            val local = existing[incoming.id]
+            existing[incoming.id] = incoming.copy(
+                review = local?.review ?: incoming.review,
+                marked = local?.marked ?: incoming.marked
+            )
+        }
         val book = StoredWordbook(bookId, title, existing.values.sortedBy { it.word.lowercase() })
         if (index >= 0) books[index] = book else books.add(book)
         saveBooks(books.sortedBy { it.title.lowercase() })
@@ -31,5 +37,19 @@ class WordbookRepository(context: Context) {
     }
     fun updateReview(entryId: String, review: Review) {
         saveBooks(loadBooks().map { book -> book.copy(entries = book.entries.map { entry -> if (entry.id == entryId) entry.copy(review = review) else entry }) })
+    }
+
+    fun updateStudyState(entryId: String, review: Review, marked: Boolean? = null) {
+        saveBooks(loadBooks().map { book ->
+            book.copy(entries = book.entries.map { entry ->
+                if (entry.id == entryId) entry.copy(review = review, marked = marked ?: entry.marked) else entry
+            })
+        })
+    }
+
+    fun updateMarked(entryId: String, marked: Boolean) {
+        saveBooks(loadBooks().map { book ->
+            book.copy(entries = book.entries.map { entry -> if (entry.id == entryId) entry.copy(marked = marked) else entry })
+        })
     }
 }

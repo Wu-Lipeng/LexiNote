@@ -18,6 +18,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Refresh
@@ -51,14 +54,36 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { WordbookRepository(context) }
     val nutstoreSettings = remember { NutstoreSettingsRepository(context) }
+    val studyScopeRepository = remember { StudyScopeRepository(context) }
     var entries by remember { mutableStateOf(repo.load()) }
     var books by remember { mutableStateOf(repo.loadBooks()) }
+    var studyScope by remember { mutableStateOf(studyScopeRepository.load()) }
     var page by remember { mutableStateOf(Page.HOME) }
+    var reviewMode by remember { mutableStateOf(ReviewMode.DUE) }
     var selected by remember { mutableStateOf<WordEntry?>(null) }
     var selectedBook by remember { mutableStateOf<StoredWordbook?>(null) }
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
+    var betaUpdateState by remember { mutableStateOf<UpdateState?>(null) }
     var syncMessage by remember { mutableStateOf("") }
     val appScope = rememberCoroutineScope()
+    val syncFromNutstore: (NutstoreConfig) -> Unit = { config ->
+        appScope.launch {
+            syncMessage = "正在从坚果云检查词库…"
+            runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
+                .onSuccess { remoteBooks ->
+                    if (remoteBooks.isEmpty()) {
+                        syncMessage = "坚果云 LexiNote 文件夹中暂无 JSON 词库"
+                    } else runCatching {
+                        val entryCount = remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) }
+                        remoteBooks.size to entryCount
+                    }.onSuccess { (bookCount, entryCount) ->
+                        entries = repo.load(); books = repo.loadBooks()
+                        syncMessage = "已从坚果云更新 $bookCount 本词库、$entryCount 个词条；复习进度已保留"
+                    }.onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
+                }
+                .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
+        }
+    }
     LaunchedEffect(Unit) {
         updateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY) }
             .fold(
@@ -69,16 +94,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                 }
             )
         val config = nutstoreSettings.load()
-        if (config.isConfigured()) {
-            syncMessage = "正在从坚果云检查词库…"
-            runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
-                .onSuccess { remoteBooks ->
-                    runCatching { remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) } }
-                        .onSuccess { count -> entries = repo.load(); books = repo.loadBooks(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
-                        .onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
-                }
-                .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
-        }
+        if (config.isConfigured()) syncFromNutstore(config)
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) runCatching {
@@ -93,39 +109,77 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         }.onFailure { Toast.makeText(context, it.message ?: "读取失败", Toast.LENGTH_LONG).show() }
     }
     val importFile = { importer.launch(arrayOf("application/json", "text/plain", "*/*")) }
-    when (page) {
-        Page.HOME -> Home(entries, updateState, syncMessage, importFile, { page = Page.REVIEW }, { page = Page.LIBRARY }, { page = Page.SETTINGS }) { update ->
-            if (!UpdateInstaller.canInstall(context)) {
-                Toast.makeText(context, "请允许 LexiNote 安装未知来源应用后重试", Toast.LENGTH_LONG).show()
-                UpdateInstaller.openInstallPermission(context)
-            } else {
-                UpdateInstaller.downloadAndInstall(context.applicationContext, update)
-                Toast.makeText(context, "正在下载 ${update.version}", Toast.LENGTH_SHORT).show()
-            }
+    val scopedEntries = studyScope.entriesFrom(books)
+    val checkBetaUpdate: () -> Unit = {
+        appScope.launch {
+            betaUpdateState = UpdateState.Checking
+            betaUpdateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY, UpdateChannel.BETA) }
+                .fold(
+                    onSuccess = { update -> update?.let(UpdateState::Available) ?: UpdateState.UpToDate },
+                    onFailure = { error -> UpdateState.Failed(error.message ?: "无法连接 GitHub") }
+                )
         }
-        Page.REVIEW -> ReviewPage(entries, onBack = { page = Page.HOME }) { entry, grade ->
-            entries = entries.map { if (it.id == entry.id) it.copy(review = ReviewScheduler.schedule(it.review, grade)) else it }
-            repo.updateReview(entry.id, entries.first { it.id == entry.id }.review)
+        Unit
+    }
+    val installUpdate: (UpdateInfo) -> Unit = { update ->
+        if (!UpdateInstaller.canInstall(context)) {
+            Toast.makeText(context, "请允许 LexiNote 安装未知来源应用后重试", Toast.LENGTH_LONG).show()
+            UpdateInstaller.openInstallPermission(context)
+        } else {
+            UpdateInstaller.downloadAndInstall(context.applicationContext, update)
+            Toast.makeText(context, "正在下载 ${update.version}", Toast.LENGTH_SHORT).show()
+        }
+    }
+    when (page) {
+        Page.HOME -> Home(
+            entries = scopedEntries,
+            updateState = updateState,
+            syncMessage = syncMessage,
+            onImport = importFile,
+            onReview = { reviewMode = ReviewMode.DUE; page = Page.REVIEW },
+            onReviewAll = { reviewMode = ReviewMode.ALL; page = Page.REVIEW },
+            onReviewMarked = { reviewMode = ReviewMode.MARKED; page = Page.REVIEW },
+            onLibrary = { page = Page.LIBRARY },
+            onSettings = { page = Page.SETTINGS },
+            onUpdate = installUpdate
+        )
+        Page.REVIEW -> ReviewPage(
+            entries = scopedEntries,
+            mode = reviewMode,
+            onBack = { page = Page.HOME },
+            onMarkedChanged = { entry, marked ->
+                repo.updateMarked(entry.id, marked)
+                entries = repo.load()
+                books = repo.loadBooks()
+            }
+        ) { entry, grade, marked ->
+            val updatedReview = ReviewScheduler.schedule(entry.review, grade)
+            repo.updateStudyState(entry.id, updatedReview, marked)
+            entries = repo.load()
+            books = repo.loadBooks()
         }
         Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
         Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
         Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.WORDBOOK }) }
-        Page.SETTINGS -> NutstoreSettingsPage(nutstoreSettings, onBack = { page = Page.HOME }) { config -> appScope.launch {
-                syncMessage = "正在从坚果云检查词库…"
-                runCatching { NutstoreWebDavRepository.downloadWordbooks(config) }
-                    .onSuccess { remoteBooks -> runCatching { remoteBooks.sumOf { remote -> repo.import(remote.content, "nutstore:${remote.filename}", remote.filename.removeSuffix(".json")) } }
-                        .onSuccess { count -> entries = repo.load(); books = repo.loadBooks(); syncMessage = "已从坚果云更新 $count 个词条；复习进度已保留" }
-                        .onFailure { syncMessage = "坚果云词库无效：${it.message ?: "导入失败"}" }
-                    }
-                    .onFailure { syncMessage = "坚果云同步失败：${it.message ?: "网络错误"}" }
-            }
-        }
+        Page.SETTINGS -> NutstoreSettingsPage(
+            repository = nutstoreSettings,
+            books = books,
+            studyScope = studyScope,
+            syncMessage = syncMessage,
+            betaUpdateState = betaUpdateState,
+            onBack = { page = Page.HOME },
+            onSync = syncFromNutstore,
+            onStudyScopeChanged = { scope -> studyScope = scope; studyScopeRepository.save(scope) },
+            onCheckBeta = checkBetaUpdate,
+            onUpdate = installUpdate
+        )
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
-    Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "坚果云设置") } }) }) { padding ->
+    val marked = entries.count { it.marked }
+    Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "设置") } }) }) { padding ->
         Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("把 Zotero 生词本带在身边", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("从 LexiNote 导出的 JSON 文件导入，所有复习记录只保存在本机。")
@@ -135,8 +189,28 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             UpdateBanner(updateState, onUpdate)
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
+            OutlinedButton(onClick = onReviewAll, Modifier.fillMaxWidth(), enabled = entries.isNotEmpty()) { Text("全部复习") }
+            OutlinedButton(onClick = onReviewMarked, Modifier.fillMaxWidth(), enabled = marked > 0) { Icon(Icons.Default.Bookmark, null); Spacer(Modifier.width(8.dp)); Text("复习标记单词（$marked）") }
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
+        }
+    }
+}
+
+@Composable private fun BetaUpdateBanner(state: UpdateState?, onCheck: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+    when (state) {
+        null -> OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("使用最新测试版") }
+        UpdateState.Checking -> Text("正在检查最新测试版…", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+        UpdateState.UpToDate -> Text("暂无可安装的更新测试版", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Failed -> Text("无法检查测试版：${state.reason}", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Available -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2D8))) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("发现测试版 ${state.update.version}", fontWeight = FontWeight.Bold)
+                    Text("测试版需由你主动选择安装", style = MaterialTheme.typography.bodySmall)
+                }
+                Button(onClick = { onUpdate(state.update) }) { Text("安装测试版") }
+            }
         }
     }
 }
@@ -145,7 +219,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     when (state) {
         UpdateState.Checking -> Text("正在检查更新…", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
         UpdateState.UpToDate -> Text("当前已是最新版本", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
-        is UpdateState.Failed -> Text("暂时无法检查更新", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Failed -> Text("无法检查更新：${state.reason}", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
         is UpdateState.Available -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F4ED))) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -158,10 +232,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit) {
+@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, books: List<StoredWordbook>, studyScope: StudyScope, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onStudyScopeChanged: (StudyScope) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     var config by remember { mutableStateOf(repository.load()) }
-    var status by remember { mutableStateOf("") }
-    Scaffold(topBar = { BackBar("坚果云同步", onBack) }) { padding ->
+    var saveStatus by remember { mutableStateOf("") }
+    Scaffold(topBar = { BackBar("设置", onBack) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 每次打开时检查 LexiNote 文件夹，并将其中每个 JSON 建为独立生词本。", style = MaterialTheme.typography.bodyMedium) }
@@ -171,48 +245,112 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             item {
                 Button(onClick = {
                     runCatching { repository.save(config) }
-                        .onSuccess { status = "设置已保存。" }
-                        .onFailure { status = it.message ?: "设置保存失败" }
+                        .onSuccess { saveStatus = "设置已保存。" }
+                        .onFailure { saveStatus = it.message ?: "设置保存失败" }
                 }, modifier = Modifier.fillMaxWidth()) { Text("保存设置") }
             }
             item {
                 OutlinedButton(onClick = {
                     runCatching { repository.save(config) }
-                        .onSuccess { onSync(config); status = "正在同步…" }
-                        .onFailure { status = it.message ?: "请先填写完整、有效的设置" }
+                        .onSuccess { onSync(config) }
+                        .onFailure { saveStatus = it.message ?: "请先填写完整、有效的设置" }
                 }, modifier = Modifier.fillMaxWidth(), enabled = config.isConfigured()) { Text("立即从坚果云同步") }
             }
-            status.takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
+            (syncMessage.ifBlank { saveStatus }).takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { Text("背词范围", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("首页待复习数量和开始复习的内容，仅包含这里选定的生词本。", style = MaterialTheme.typography.bodyMedium) }
+            item {
+                Row(Modifier.fillMaxWidth().clickable {
+                    onStudyScopeChanged(
+                        if (studyScope.useAllBooks) StudyScope(false, books.map { it.id }.toSet()) else StudyScope(true)
+                    )
+                }, verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(studyScope.useAllBooks, onCheckedChange = { checked ->
+                        onStudyScopeChanged(if (checked) StudyScope(true) else StudyScope(false, books.map { it.id }.toSet()))
+                    })
+                    Text("全部 Zotero 词库", fontWeight = FontWeight.Medium)
+                }
+            }
+            if (!studyScope.useAllBooks) {
+                if (books.isEmpty()) item { Text("尚无可选择的生词本。", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
+                items(books, key = { it.id }) { book ->
+                    val checked = book.id in studyScope.selectedBookIds
+                    Row(Modifier.fillMaxWidth().clickable {
+                        val selectedIds = if (checked) studyScope.selectedBookIds - book.id else studyScope.selectedBookIds + book.id
+                        onStudyScopeChanged(studyScope.copy(selectedBookIds = selectedIds))
+                    }.padding(start = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Checkbox(checked, onCheckedChange = { selected ->
+                            val selectedIds = if (selected) studyScope.selectedBookIds + book.id else studyScope.selectedBookIds - book.id
+                            onStudyScopeChanged(studyScope.copy(selectedBookIds = selectedIds))
+                        })
+                        Column {
+                            Text(book.title)
+                            Text("${book.entries.size} 个词条", style = MaterialTheme.typography.bodySmall, color = Color(0xFF6A706C))
+                        }
+                    }
+                }
+            }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { Text("测试版", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("测试版包含尚未正式发布的功能，需要由你主动检查并安装。", style = MaterialTheme.typography.bodyMedium) }
+            item { BetaUpdateBanner(betaUpdateState, onCheckBeta, onUpdate) }
+            item {
+                val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
+                Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+            }
         }
     }
 }
 
-@Composable private fun ReviewPage(entries: List<WordEntry>, onBack: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
-    val card = entries.firstOrNull { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
-    val sessionTotal = remember { entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() } }
-    val remaining = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
-    val completed = (sessionTotal - remaining).coerceAtLeast(0)
+@Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, onBack: () -> Unit, onMarkedChanged: (WordEntry, Boolean) -> Unit, onGrade: (WordEntry, Int, Boolean?) -> Unit) {
+    var queueIds by remember(mode) { mutableStateOf(ReviewSession.shuffledIds(entries, mode)) }
+    var reviewProgress by remember(mode) { mutableStateOf(ReviewProgress()) }
+    val sessionTotal = queueIds.size
+    val card = queueIds.getOrNull(reviewProgress.currentIndex)?.let { id -> entries.firstOrNull { it.id == id } }
+    val completed = reviewProgress.reviewedIndices.size
     val progress = if (sessionTotal == 0) 1f else completed.toFloat() / sessionTotal
+    val finished = reviewProgress.isComplete(sessionTotal)
     var reveal by remember(card?.id) { mutableStateOf(false) }
     Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp, vertical = 14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
                 Spacer(Modifier.weight(1f))
-                Text("今日复习", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                if (finished) {
+                    Text("本轮完成", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                } else {
+                    IconButton(onClick = { reviewProgress = reviewProgress.goBack() }, enabled = reviewProgress.canGoBack()) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一个单词")
+                    }
+                    Text(mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                    IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
+                    }
+                    IconButton(onClick = { card?.let { onMarkedChanged(it, !it.marked) } }, enabled = card != null) {
+                        Icon(
+                            imageVector = if (card?.marked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                            contentDescription = if (card?.marked == true) "取消标记" else "标记单词",
+                            tint = if (card?.marked == true) Color(0xFFE0A12D) else LocalContentColor.current
+                        )
+                    }
+                }
                 Spacer(Modifier.weight(1f))
                 Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
             }
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(7.dp), color = Color(0xFF3B8F72), trackColor = Color(0xFFE0E7DE))
             Spacer(Modifier.height(24.dp))
-            if (card == null) CompletedReview(onBack)
-            else StudyCard(card, reveal, { reveal = true }, onGrade)
+            if (card == null || finished) CompletedReview(mode, sessionTotal, onBack)
+            else StudyCard(card, mode, reveal, { reveal = true }) { entry, grade, marked ->
+                reviewProgress = reviewProgress.gradeCurrent(sessionTotal)
+                onGrade(entry, grade, marked)
+            }
         }
     }
 }
 
-@Composable private fun StudyCard(card: WordEntry, reveal: Boolean, onReveal: () -> Unit, onGrade: (WordEntry, Int) -> Unit) {
+@Composable private fun StudyCard(card: WordEntry, mode: ReviewMode, reveal: Boolean, onReveal: () -> Unit, onGrade: (WordEntry, Int, Boolean?) -> Unit) {
     val cardShape = RoundedCornerShape(28.dp)
     Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
         Surface(
@@ -246,16 +384,21 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         Spacer(Modifier.height(18.dp))
         if (!reveal) Button(onClick = onReveal, modifier = Modifier.fillMaxWidth().height(54.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("查看释义", fontWeight = FontWeight.Bold) }
         else Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            OutlinedButton(onClick = { onGrade(card, 0) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE09372)), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC75A35))) { Text("再记一次\n明天复习", textAlign = TextAlign.Center) }
-            Button(onClick = { onGrade(card, 2) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("认识了\n间隔复习", textAlign = TextAlign.Center) }
+            val markedReview = mode == ReviewMode.MARKED
+            OutlinedButton(onClick = { onGrade(card, 0, if (markedReview) true else null) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE09372)), colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFC75A35))) {
+                Text(if (markedReview) "不认识\n保留标记" else "再记一次\n明天复习", textAlign = TextAlign.Center)
+            }
+            Button(onClick = { onGrade(card, 2, if (markedReview) false else null) }, modifier = Modifier.weight(1f).height(56.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) {
+                Text(if (markedReview) "认识\n取消标记" else "认识了\n间隔复习", textAlign = TextAlign.Center)
+            }
         }
         Spacer(Modifier.height(10.dp))
     }
 }
 
-@Composable private fun CompletedReview(onBack: () -> Unit) = Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-    Text("今日完成", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
-    Text("每一次回忆，都会让知识更牢固。", modifier = Modifier.padding(top = 12.dp), color = Color(0xFF6B706C))
+@Composable private fun CompletedReview(mode: ReviewMode, completed: Int, onBack: () -> Unit) = Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+    Text(if (mode == ReviewMode.MARKED) "标记复习完成" else "本轮复习完成", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+    Text(if (mode == ReviewMode.MARKED) "已完成 $completed 个标记词复习。" else "每一次回忆，都会让知识更牢固。", modifier = Modifier.padding(top = 12.dp), color = Color(0xFF6B706C))
     Button(onClick = onBack, modifier = Modifier.padding(top = 28.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("返回首页") }
 }
 
