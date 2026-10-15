@@ -17,7 +17,19 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("nutstoreUsername").value = nutstoreCredentials.username;
     $("nutstorePassword").value = nutstoreCredentials.password;
     const updateNutstoreAvailability = () => { $("syncWordbook").disabled = !app.isNutstoreConfigured(); };
+    const updateNutstoreSyncFileStatus = async () => {
+      const status = $("nutstoreSyncFileStatus");
+      status.textContent = "正在读取当前词库的坚果云同步记录…";
+      try {
+        const parent = await app.exportParentItem();
+        const filename = await app.savedNutstoreFilename(parent);
+        status.textContent = filename
+          ? `当前词库已记录坚果云同步文件：${filename}（离线记录，未检查远端文件是否仍存在）`
+          : "当前词库尚未记录坚果云同步文件。";
+      } catch (e) { status.textContent = `当前词库的坚果云同步记录无法判断：${e.message || "请先打开或选中文献。"}`; }
+    };
     updateNutstoreAvailability();
+    void updateNutstoreSyncFileStatus();
     const baiduDrafts = {};
     let dirty = false;
     let previousProvider = $("provider").value;
@@ -130,7 +142,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
         const synced = await app.syncCurrentWordbookToNutstore(filename);
         $("status").textContent = `生词本排序完成并已同步 ${synced.entries} 个词条到坚果云：\n${synced.filename}`;
       } catch (e) { $("status").textContent = e.message || "生词本排序失败。"; }
-      finally { $("sortWordbook").disabled = false; updateNutstoreAvailability(); }
+      finally { $("sortWordbook").disabled = false; updateNutstoreAvailability(); void updateNutstoreSyncFileStatus(); }
     });
     $("exportWordbook").addEventListener("click", async () => {
       $("exportWordbook").disabled = true;
@@ -148,11 +160,12 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       $("syncWordbook").disabled = true;
       try {
         $("status").textContent = "正在同步当前词库到坚果云…";
-        const filename = await app.savedNutstoreFilename(await app.exportParentItem()) || await app.promptNutstoreFilename(window);
+        const parent = await app.exportParentItem();
+        const filename = await app.savedNutstoreFilename(parent) || await app.promptNutstoreFilename(window);
         const result = await app.syncCurrentWordbookToNutstore(filename);
         $("status").textContent = `已同步 ${result.entries} 个词条到坚果云：\n${result.filename}\n${result.url}`;
       } catch (e) { $("status").textContent = e.message || "坚果云同步失败。"; }
-      finally { updateNutstoreAvailability(); }
+      finally { updateNutstoreAvailability(); void updateNutstoreSyncFileStatus(); }
     });
     $("diagnoseSourceSentences").addEventListener("click", async () => {
       $("diagnoseSourceSentences").disabled = true;
