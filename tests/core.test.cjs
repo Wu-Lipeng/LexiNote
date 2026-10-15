@@ -186,6 +186,19 @@ test('automatic Nutstore sync restores a missing local filename mapping before q
   assert.equal(saved,'recovered.json');
   for (const timer of app.autoSyncTimers.values()) clearTimeout(timer);
 });
+test('automatic upload restores a mapping that is unavailable when its queue runs', async () => {
+  const {app,context}=runtime({...base, nutstoreEnabled:true, nutstoreAutoSync:true, nutstoreAutoSyncDebounce:1, nutstoreAutoSyncMinInterval:1});
+  const parent={id:44,deleted:false,isRegularItem:()=>true};
+  context.Zotero.Items={getAsync:async()=>parent};
+  app.isNutstoreConfigured=()=>true;
+  app.savedNutstoreFilename=async()=> '';
+  app.findNutstoreWordbookFilename=async()=> 'recovered.json';
+  let saved='', uploaded='';
+  app.saveNutstoreFilename=async (_parent, filename)=>{saved=filename;};
+  app.syncWordbookToNutstore=async (_parent, filename)=>{uploaded=filename;return {entries:1,filename};};
+  await app.enqueueAutoSync(44);
+  assert.equal(saved,'recovered.json'); assert.equal(uploaded,'recovered.json');
+});
 test('plugin-originated automatic sync queues the changed wordbook without a global notifier', async () => {
   const {app}=runtime(); const queued=[];
   app.scheduleAutoSync=async parent=>queued.push(parent.id);

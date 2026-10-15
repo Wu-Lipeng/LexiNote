@@ -96,8 +96,12 @@ var LexiNoteRuntime = class {
       if (!this.alive || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return;
       const parent = await Zotero.Items.getAsync(parentID);
       if (!parent || parent.deleted || !parent.isRegularItem?.()) return;
-      const filename = await this.savedNutstoreFilename(parent);
-      if (!filename) return;
+      let filename = await this.savedNutstoreFilename(parent);
+      if (!filename) {
+        filename = await this.findNutstoreWordbookFilename(parent);
+        if (!filename) throw new Error("自动上传前未找到当前词库对应的坚果云文件，请先手动同步一次。");
+        await this.saveNutstoreFilename(parent, filename);
+      }
       const remaining = this.autoSyncDelayMilliseconds(parentID) - this.config.nutstoreAutoSyncDebounce * 1000;
       if (remaining > 0) { await new Promise(resolve => setTimeout(resolve, remaining)); }
       const result = await this.autoSyncWithTimeout(this.syncWordbookToNutstore(parent, filename, false));
