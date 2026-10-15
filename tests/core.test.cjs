@@ -185,9 +185,8 @@ test('item notifications enqueue eligible LexiNote wordbooks for automatic sync'
   await app.handleItemNotification('modify','item',[11]);
   await app.handleItemNotification('modify','item',[99]);
   assert.deepEqual(queued,[12]);
-  app.suppressAutoSyncForNote(11);
   await app.handleItemNotification('modify','item',[11]);
-  assert.deepEqual(queued,[12]);
+  assert.deepEqual(queued,[12,12]);
 });
 test('wordbook identity uses a synced item key scoped to its Zotero library', () => {
   const {app}=runtime();

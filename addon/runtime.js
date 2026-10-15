@@ -18,7 +18,6 @@ var LexiNoteRuntime = class {
     this.autoSyncQueues = new Map();
     this.autoSyncLastAt = new Map();
     this.autoSyncFailures = new Map();
-    this.autoSyncSuppressedNoteIDs = new Map();
     this.notifierID = null;
     this.notifierObserver = { notify: (event, type, ids) => { void this.handleItemNotification(event, type, ids); } };
     this.alive = true;
@@ -50,21 +49,11 @@ var LexiNoteRuntime = class {
     const remaining = Math.max(0, (this.autoSyncLastAt.get(parentID) || 0) + minimum - Date.now());
     return Math.max(debounce, remaining);
   }
-  suppressAutoSyncForNote(noteID) {
-    this.autoSyncSuppressedNoteIDs.set(Number(noteID), Date.now() + 60000);
-  }
-  isAutoSyncSuppressed(noteID) {
-    const expiry = this.autoSyncSuppressedNoteIDs.get(Number(noteID));
-    if (!expiry) return false;
-    if (expiry > Date.now()) { this.autoSyncSuppressedNoteIDs.delete(Number(noteID)); return true; }
-    this.autoSyncSuppressedNoteIDs.delete(Number(noteID));
-    return false;
-  }
   async handleItemNotification(event, type, ids) {
     if (!this.alive || type !== "item" || !["add", "modify"].includes(event) || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return;
     const items = await Zotero.Items.getAsync(ids).catch(() => []);
     for (const note of items) {
-      if (!note || note.deleted || !note.parentID || !note.hasTag?.(this.tag) || this.isAutoSyncSuppressed(note.id)) continue;
+      if (!note || note.deleted || !note.parentID || !note.hasTag?.(this.tag)) continue;
       const parent = await Zotero.Items.getAsync(note.parentID).catch(() => null);
       if (parent?.isRegularItem?.() && !parent.deleted) void this.scheduleAutoSync(parent);
     }
@@ -1066,7 +1055,6 @@ var LexiNoteRuntime = class {
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
       root.dataset.lexinoteNutstoreFilename = safeFilename;
       note.setNote(document.body.innerHTML);
-      this.suppressAutoSyncForNote(note.id);
       await note.saveTx();
       saved++;
     }
