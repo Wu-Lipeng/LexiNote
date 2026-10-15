@@ -61,7 +61,6 @@ var LexiNoteRuntime = class {
     const delay = this.autoSyncDelayMilliseconds(parentID);
     this.autoSyncTimers.set(parentID, setTimeout(() => {
       this.autoSyncTimers.delete(parentID);
-      this.showAutoSyncNotice("LexiNote 自动同步", "等待结束，正在上传当前词库到坚果云…");
       void this.enqueueAutoSync(parentID);
     }, delay));
     return true;
@@ -69,17 +68,11 @@ var LexiNoteRuntime = class {
   queueAutoSync(parent) {
     // This is deliberately called only from LexiNote's own successful writes.
     void this.scheduleAutoSync(parent).then(scheduled => {
-      if (!scheduled) this.showAutoSyncNotice("LexiNote 自动同步", "未进入自动同步队列：请确认已启用自动同步、坚果云设置完整，并且当前词库已手动同步过一次。");
-      else this.showAutoSyncNotice("LexiNote 自动同步", `当前词库已进入自动同步队列，将在设定的延迟后上传。`);
+      if (!scheduled) this.autoSyncFailures.set(Number(parent?.id), "自动同步未配置或未找到对应的坚果云词库文件。");
     }).catch(error => {
       const message = String(error?.message || error);
       this.autoSyncFailures.set(Number(parent?.id), message);
-      this.showAutoSyncNotice("LexiNote 自动同步失败", `无法进入自动同步队列：\n${message}`);
     });
-  }
-  showAutoSyncNotice(title, message) {
-    try { Services.prompt.alert(Zotero.getMainWindow?.(), title, message); }
-    catch (_) {}
   }
   async autoSyncWithTimeout(promise, milliseconds = 45000) {
     let timer;
@@ -107,16 +100,12 @@ var LexiNoteRuntime = class {
       const result = await this.autoSyncWithTimeout(this.syncWordbookToNutstore(parent, filename, false));
       this.autoSyncLastAt.set(parentID, Date.now());
       this.autoSyncFailures.delete(parentID);
-      // Temporary beta diagnostic: make automatic-sync state visible until the
-      // workflow has been confirmed in Zotero.
-      this.showAutoSyncNotice("LexiNote 自动同步", `已自动同步 ${result.entries} 个词条到坚果云：\n${result.filename}`);
     });
     this.autoSyncQueues.set(parentID, task);
     try { await task; }
     catch (error) {
       const message = String(error?.message || error);
       this.autoSyncFailures.set(parentID, message);
-      this.showAutoSyncNotice("LexiNote 自动同步失败", `上传到坚果云失败：\n${message}`);
     }
     finally { if (this.autoSyncQueues.get(parentID) === task) this.autoSyncQueues.delete(parentID); }
   }
