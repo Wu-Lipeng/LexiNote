@@ -74,7 +74,7 @@ function runtime(initialConfig = base, credentials = {}) {
     respond(status, value) { this.status=status; this.responseText=JSON.stringify(value); this.onload?.(); }
   }
   const context = vm.createContext({ LexiNoteCore:C, LexiNoteTrialCredentials:{baiduApiKey:'trial-key',baiduSecretKey:'trial-secret'}, XMLHttpRequest:FakeXHR, URL, setTimeout,clearTimeout,setInterval,clearInterval,
-    Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}}}, Services:{logins:{findLogins:(_,__,name)=>credentials[name] ? [{password:credentials[name]}] : []}} });
+    Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}},Libraries:{get:id=>id === 2 ? {libraryType:'group',groupID:99} : {libraryType:'user'}}}, Services:{logins:{findLogins:(_,__,name)=>credentials[name] ? [{password:credentials[name]}] : []}} });
   vm.runInContext(fs.readFileSync(require.resolve('../addon/runtime.js'),'utf8'),context);
   const app = vm.runInContext('new LexiNoteRuntime({id:"test",rootURI:""})',context);
   return {app,requests,prefs,sent:()=>sent};
@@ -156,6 +156,15 @@ test('Nutstore settings accept the official HTTPS DAV endpoint and per-document 
   assert.equal(app.nutstoreFileUrl('my-wordbook.json'), 'https://dav.jianguoyun.com/dav/LexiNote/my-wordbook.json');
   assert.throws(() => app.nutstoreFilename('folder/wordbook.json'), /文件名/);
   assert.throws(() => app.nutstoreConfig({...config, nutstoreServerUrl:'http://dav.jianguoyun.com/dav/'}), /HTTPS/);
+});
+test('wordbook identity uses a synced item key scoped to its Zotero library', () => {
+  const {app}=runtime();
+  assert.deepEqual(JSON.parse(JSON.stringify(app.wordbookIdentity({libraryID:1,key:'PARENT01'}))), {zoteroLibrary:'user',zoteroItemKey:'PARENT01'});
+  assert.deepEqual(JSON.parse(JSON.stringify(app.wordbookIdentity({libraryID:2,key:'PARENT02'}))), {zoteroLibrary:'group:99',zoteroItemKey:'PARENT02'});
+  assert.equal(app.wordbookMatchesParent({source:{zoteroLibrary:'user',zoteroItemKey:'PARENT01'}}, {libraryID:1,key:'PARENT01'}), true);
+  assert.equal(app.wordbookMatchesParent({source:{zoteroLibrary:'group:99',zoteroItemKey:'PARENT01'}}, {libraryID:1,key:'PARENT01'}), false);
+  assert.deepEqual(JSON.parse(JSON.stringify(app.nutstoreFilenamesFromResponse('<d:href>/dav/LexiNote/one%20book.json</d:href><href>/dav/LexiNote/two.json</href>'))), ['one book.json','two.json']);
+  assert.equal(app.wordbookMatchesParent({entries:[{source:{zoteroItemKey:'PARENT01'}}]}, {libraryID:1,key:'PARENT01'}, true), true);
 });
 test('wordbook export recognizes standalone example labels and following lines', async () => {
   const {app}=runtime();

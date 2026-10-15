@@ -22,10 +22,15 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       status.textContent = "正在读取当前词库的坚果云同步记录…";
       try {
         const parent = await app.exportParentItem();
-        const filename = await app.savedNutstoreFilename(parent);
+        const savedFilename = await app.savedNutstoreFilename(parent);
+        if (!app.isNutstoreConfigured()) {
+          status.textContent = savedFilename ? `当前词库已记录坚果云同步文件：${savedFilename}（坚果云未配置，未联网验证）` : "当前词库尚未记录坚果云同步文件。";
+          return;
+        }
+        const filename = await app.findNutstoreWordbookFilename(parent);
         status.textContent = filename
-          ? `当前词库已记录坚果云同步文件：${filename}（离线记录，未检查远端文件是否仍存在）`
-          : "当前词库尚未记录坚果云同步文件。";
+          ? `坚果云中已找到当前词库文件：${filename}`
+          : savedFilename ? `本地记录的坚果云文件“${savedFilename}”未在坚果云中找到。` : "坚果云中未找到当前词库文件。";
       } catch (e) { status.textContent = `当前词库的坚果云同步记录无法判断：${e.message || "请先打开或选中文献。"}`; }
     };
     updateNutstoreAvailability();
@@ -125,7 +130,8 @@ var LexiNotePreferences = window.LexiNotePreferences = {
           return;
         }
         window.alert(`生词本排序完成：\n扫描 ${result.scanned} 个高亮\n明确匹配 ${result.matched} 个词条\n移动 ${result.moved} 个词条\n更新 ${result.updated} 本生词本`);
-        const filename = await app.savedNutstoreFilename(result.parent);
+        let filename = await app.savedNutstoreFilename(result.parent);
+        if (!filename && app.isNutstoreConfigured()) filename = await app.findNutstoreWordbookFilename(result.parent);
         if (!filename) {
           $("status").textContent = "生词本排序完成。此生词本尚未同步到坚果云。";
           return;
@@ -161,7 +167,12 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       try {
         $("status").textContent = "正在同步当前词库到坚果云…";
         const parent = await app.exportParentItem();
-        const filename = await app.savedNutstoreFilename(parent) || await app.promptNutstoreFilename(window);
+        let filename = await app.savedNutstoreFilename(parent);
+        if (!filename) {
+          $("status").textContent = "正在坚果云中查找当前文献的既有词库…";
+          filename = await app.findNutstoreWordbookFilename(parent);
+        }
+        filename ||= await app.promptNutstoreFilename(window);
         const result = await app.syncCurrentWordbookToNutstore(filename);
         $("status").textContent = `已同步 ${result.entries} 个词条到坚果云：\n${result.filename}\n${result.url}`;
       } catch (e) { $("status").textContent = e.message || "坚果云同步失败。"; }

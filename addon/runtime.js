@@ -108,6 +108,69 @@ var LexiNoteRuntime = class {
   nutstoreFileUrl(filename, config = this.config) {
     return new URL(encodeURIComponent(this.nutstoreFilename(filename)), this.nutstoreFolderUrl(config)).href;
   }
+  nutstoreAuthorization() {
+    const credentials = this.nutstoreCredentials();
+    return `Basic ${btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)))}`;
+  }
+  wordbookIdentity(parent) {
+    const library = Zotero.Libraries.get(parent.libraryID);
+    const scope = library?.libraryType === "group" ? `group:${library.groupID}` : "user";
+    return { zoteroLibrary: scope, zoteroItemKey: String(parent?.key || "") };
+  }
+  nutstoreFilenamesFromResponse(xml) {
+    const filenames = new Set();
+    for (const match of String(xml || "").matchAll(/<(?:[\w-]+:)?href[^>]*>([^<]+)<\/(?:[\w-]+:)?href>/gi)) {
+      try {
+        const url = new URL(match[1].trim(), this.nutstoreFolderUrl());
+        const filename = decodeURIComponent(url.pathname.split("/").filter(Boolean).at(-1) || "");
+        if (/\.json$/i.test(filename)) filenames.add(this.nutstoreFilename(filename));
+      } catch (_) {}
+    }
+    return [...filenames];
+  }
+  async nutstoreWordbookFilenames() {
+    if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
+    const auth = this.nutstoreAuthorization();
+    try {
+      const response = await Zotero.HTTP.request("PROPFIND", this.nutstoreFolderUrl(), {
+        headers: { "Authorization": auth, "Depth": "1" }, timeout: 30000
+      });
+      return this.nutstoreFilenamesFromResponse(response.responseText || response.response || "");
+    } catch (error) {
+      const status = error?.status || error?.xmlhttp?.status;
+      if (status === 404) return [];
+      if (status === 401 || status === 403) throw new Error("坚果云拒绝访问，请检查账号与第三方应用密码。");
+      throw new Error(`读取坚果云词库失败：${error?.message || "网络请求失败"}`);
+    }
+  }
+  wordbookMatchesParent(wordbook, parent, allowLegacy = false) {
+    const target = this.wordbookIdentity(parent);
+    const source = wordbook?.source || {};
+    if (source.zoteroLibrary && source.zoteroItemKey) {
+      return source.zoteroLibrary === target.zoteroLibrary && source.zoteroItemKey === target.zoteroItemKey;
+    }
+    if (!allowLegacy || !target.zoteroItemKey || !Array.isArray(wordbook?.entries) || !wordbook.entries.length) return false;
+    return wordbook.entries.every(entry => entry?.source?.zoteroItemKey === target.zoteroItemKey);
+  }
+  async findNutstoreWordbookFilename(parent) {
+    const filenames = await this.nutstoreWordbookFilenames();
+    const exact = [], legacy = [];
+    const auth = this.nutstoreAuthorization();
+    for (const filename of filenames) {
+      try {
+        const response = await Zotero.HTTP.request("GET", this.nutstoreFileUrl(filename), {
+          headers: { "Authorization": auth }, timeout: 30000
+        });
+        const wordbook = JSON.parse(response.responseText || response.response || "");
+        if (wordbook?.format !== "lexinote-wordbook") continue;
+        if (this.wordbookMatchesParent(wordbook, parent)) exact.push(filename);
+        else if (this.wordbookMatchesParent(wordbook, parent, true)) legacy.push(filename);
+      } catch (_) { /* Ignore unrelated or malformed files and continue scanning. */ }
+    }
+    const matches = exact.length ? exact : legacy;
+    if (matches.length > 1) throw new Error("坚果云中找到多个属于当前文献的词库文件，请保留一个文件后再同步。");
+    return matches[0] || "";
+  }
   async ensureNutstoreFolder(credentials) {
     const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
     try {
@@ -844,6 +907,7 @@ var LexiNoteRuntime = class {
       meanings: paragraphs.filter(Boolean),
       example,
       source: {
+        ...this.wordbookIdentity(parent),
         zoteroItemKey: parent?.key || "",
         title: parent?.getField?.("title") || "",
         attachmentKey,
@@ -888,6 +952,7 @@ var LexiNoteRuntime = class {
       format: "lexinote-wordbook",
       schemaVersion: 1,
       exportedAt: new Date().toISOString(),
+      source: { ...this.wordbookIdentity(parent), title: parent?.getField?.("title") || "" },
       language: { source: "en", target: this.config.target || "zh-CN" },
       entries
     };
