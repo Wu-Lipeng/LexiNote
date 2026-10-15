@@ -131,23 +131,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
           return;
         }
         window.alert(`生词本排序完成：\n扫描 ${result.scanned} 个高亮\n明确匹配 ${result.matched} 个词条\n移动 ${result.moved} 个词条\n更新 ${result.updated} 本生词本`);
-        let filename = await app.savedNutstoreFilename(result.parent);
-        if (!filename && app.isNutstoreConfigured()) filename = await app.findNutstoreWordbookFilename(result.parent);
-        if (!filename) {
-          $("status").textContent = "生词本排序完成。此生词本尚未同步到坚果云。";
-          return;
-        }
-        if (!app.isNutstoreConfigured()) {
-          $("status").textContent = "生词本排序完成。此生词本曾同步到坚果云，但当前坚果云设置未配置完整，未上传。";
-          return;
-        }
-        if (!window.confirm(`此生词本此前已同步到坚果云（${filename}）。是否立即手动同步排序后的词库？`)) {
-          $("status").textContent = "生词本排序完成；未同步到坚果云。";
-          return;
-        }
-        $("status").textContent = "正在同步排序后的词库到坚果云…";
-        const synced = await app.syncCurrentWordbookToNutstore(filename);
-        $("status").textContent = `生词本排序完成并已同步 ${synced.entries} 个词条到坚果云：\n${synced.filename}`;
+        $("status").textContent = "生词本排序完成。若已启用自动同步且该词库已有坚果云文件记录，将按设定的延迟自动上传。";
       } catch (e) { $("status").textContent = e.message || "生词本排序失败。"; }
       finally { $("sortWordbook").disabled = false; updateNutstoreAvailability(); void updateNutstoreSyncFileStatus(); }
     });

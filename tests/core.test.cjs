@@ -176,17 +176,12 @@ test('automatic Nutstore sync debounces per wordbook and preserves the configure
   assert.ok(app.autoSyncDelayMilliseconds(42)>=1900);
   for (const timer of app.autoSyncTimers.values()) clearTimeout(timer);
 });
-test('item notifications enqueue eligible LexiNote wordbooks for automatic sync', async () => {
-  const {app,context}=runtime({...base, nutstoreEnabled:true, nutstoreAutoSync:true}, {'Nutstore WebDAV Username':'user@example.com','Nutstore WebDAV Password':'app-password'});
-  const note={id:11,parentID:12,deleted:false,hasTag:tag=>tag==='LexiNote:生词本'};
-  const parent={id:12,deleted:false,isRegularItem:()=>true};
-  context.Zotero.Items={getAsync:async id=>Array.isArray(id)?id.map(value=>value===11?note:null):(id===12?parent:null)};
-  const queued=[]; app.scheduleAutoSync=async value=>queued.push(value.id);
-  await app.handleItemNotification('modify','item',[11]);
-  await app.handleItemNotification('modify','item',[99]);
+test('plugin-originated automatic sync queues the changed wordbook without a global notifier', async () => {
+  const {app}=runtime(); const queued=[];
+  app.scheduleAutoSync=async parent=>queued.push(parent.id);
+  app.queueAutoSync({id:12});
+  await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(queued,[12]);
-  await app.handleItemNotification('modify','item',[11]);
-  assert.deepEqual(queued,[12,12]);
 });
 test('wordbook identity uses a synced item key scoped to its Zotero library', () => {
   const {app}=runtime();

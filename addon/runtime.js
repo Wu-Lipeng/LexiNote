@@ -18,8 +18,6 @@ var LexiNoteRuntime = class {
     this.autoSyncQueues = new Map();
     this.autoSyncLastAt = new Map();
     this.autoSyncFailures = new Map();
-    this.notifierID = null;
-    this.notifierObserver = { notify: (event, type, ids) => { void this.handleItemNotification(event, type, ids); } };
     this.alive = true;
     this.handler = event => this.selection(event);
     this.config = this.readConfig();
@@ -40,7 +38,6 @@ var LexiNoteRuntime = class {
       scripts: [this.rootURI + "preferences.js"]
     });
     Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.handler, this.id);
-    if (Zotero.Notifier?.registerObserver) this.notifierID = Zotero.Notifier.registerObserver(this.notifierObserver, ["item"], "lexinote-auto-sync");
     this.updateNoteLocatorScanning();
   }
   autoSyncDelayMilliseconds(parentID) {
@@ -48,15 +45,6 @@ var LexiNoteRuntime = class {
     const minimum = this.config.nutstoreAutoSyncMinInterval * 1000;
     const remaining = Math.max(0, (this.autoSyncLastAt.get(parentID) || 0) + minimum - Date.now());
     return Math.max(debounce, remaining);
-  }
-  async handleItemNotification(event, type, ids) {
-    if (!this.alive || type !== "item" || !["add", "modify"].includes(event) || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return;
-    const items = await Zotero.Items.getAsync(ids).catch(() => []);
-    for (const note of items) {
-      if (!note || note.deleted || !note.parentID || !note.hasTag?.(this.tag)) continue;
-      const parent = await Zotero.Items.getAsync(note.parentID).catch(() => null);
-      if (parent?.isRegularItem?.() && !parent.deleted) void this.scheduleAutoSync(parent);
-    }
   }
   async scheduleAutoSync(parent) {
     if (!this.alive || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return false;
@@ -72,6 +60,12 @@ var LexiNoteRuntime = class {
       void this.enqueueAutoSync(parentID);
     }, delay));
     return true;
+  }
+  queueAutoSync(parent) {
+    // This is deliberately called only from LexiNote's own successful writes.
+    void this.scheduleAutoSync(parent).catch(error => {
+      this.autoSyncFailures.set(Number(parent?.id), String(error?.message || error));
+    });
   }
   async enqueueAutoSync(parentID) {
     const prior = this.autoSyncQueues.get(parentID) || Promise.resolve();
@@ -1227,6 +1221,7 @@ var LexiNoteRuntime = class {
       matched += result.matched; moved += result.moved;
       if (result.moved) { note.setNote(document.body.innerHTML); await note.saveTx(); updated++; }
     }
+    if (updated) this.queueAutoSync(parent);
     return { parent, scanned: highlights.length, matched, moved, updated, changed: moved > 0 };
   }
   async syncCurrentPDFHighlightsToNotebook() {
@@ -1266,6 +1261,7 @@ var LexiNoteRuntime = class {
         updated++;
       }
     }
+    if (updated) this.queueAutoSync(parent);
     return { scanned: highlights.length, matched, updated };
   }
   async syncManualHighlightToNotebook(highlightID, entryWord) {
@@ -1300,6 +1296,7 @@ var LexiNoteRuntime = class {
         updated++;
       }
     }
+    if (updated) this.queueAutoSync(parent);
     return JSON.stringify({ matched, updated });
   }
   async syncManualEntryToHighlight(entryRef, highlightText) {
@@ -1310,6 +1307,7 @@ var LexiNoteRuntime = class {
     if (!Number.isInteger(noteID) || !Number.isInteger(headingIndex) || headingIndex < 0) throw new Error("词条标识已失效；请重新打开匹配诊断后再试。");
     const attachment = await Zotero.Items.getAsync(reader.itemID);
     if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+    const parent = await Zotero.Items.getAsync(attachment.parentID);
     const normalizedHighlightWord = LexiNoteCore.normalize(LexiNoteCore.wordFrom(highlightText));
     if (!normalizedHighlightWord) throw new Error("请输入单个高亮文本。");
     const highlight = (await this.currentFormatHighlights(attachment)).find(item => item.normalizedWord === normalizedHighlightWord);
@@ -1322,8 +1320,9 @@ var LexiNoteRuntime = class {
     if (!this.isWordHeading(heading)) throw new Error("词条位置已变化；请重新打开匹配诊断后再试。");
     const before = document.body.innerHTML;
     this.updateSavedWordFormat(document, root, heading, highlight.word, attachment, highlight.pageLabel, highlight.pageIndex, highlight.id, true);
-    if (document.body.innerHTML !== before) { note.setNote(document.body.innerHTML); await note.saveTx(); }
-    return JSON.stringify({ matched: 1, updated: document.body.innerHTML !== before });
+    const updated = document.body.innerHTML !== before;
+    if (updated) { note.setNote(document.body.innerHTML); await note.saveTx(); this.queueAutoSync(parent); }
+    return JSON.stringify({ matched: 1, updated });
   }
   async diagnoseCurrentPDFHighlightMatches() {
     let stage = "读取当前 PDF";
@@ -1638,6 +1637,7 @@ var LexiNoteRuntime = class {
           try { await candidate.saveTx(); }
           catch (_) { throw new Error("已保存的生词格式更新失败，请检查文献库权限后重试。"); }
           await this.verifySavedWord(candidate.id, normalizedWord);
+          this.queueAutoSync(parent);
         }
         return { noteID: candidate.id, duplicate: true, formatUpdated };
       }
@@ -1674,6 +1674,7 @@ var LexiNoteRuntime = class {
       throw new Error("笔记保存失败，请检查文献库权限后重试。");
     }
     await this.verifySavedWord(note.id, normalizedWord);
+    this.queueAutoSync(parent);
     return { noteID: note.id, duplicate: false };
   }
   async verifySavedWord(noteID, normalizedWord) {
@@ -1697,8 +1698,6 @@ var LexiNoteRuntime = class {
   stop() {
     this.alive = false;
     Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.handler);
-    if (this.notifierID != null) Zotero.Notifier?.unregisterObserver?.(this.notifierID);
-    this.notifierID = null;
     for (const timer of this.autoSyncTimers.values()) clearTimeout(timer);
     this.autoSyncTimers.clear();
     clearInterval(this.noteLocatorTimer);
