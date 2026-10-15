@@ -77,9 +77,12 @@ var LexiNoteRuntime = class {
       if (!filename) return;
       const remaining = this.autoSyncDelayMilliseconds(parentID) - this.config.nutstoreAutoSyncDebounce * 1000;
       if (remaining > 0) { await new Promise(resolve => setTimeout(resolve, remaining)); }
-      await this.syncWordbookToNutstore(parent, filename, false);
+      const result = await this.syncWordbookToNutstore(parent, filename, false);
       this.autoSyncLastAt.set(parentID, Date.now());
       this.autoSyncFailures.delete(parentID);
+      // Temporary beta diagnostic: make successful automatic uploads visible
+      // until the workflow has been confirmed in Zotero.
+      Services.prompt.alert(Zotero.getMainWindow?.(), "LexiNote 自动同步", `已自动同步 ${result.entries} 个词条到坚果云：\n${result.filename}`);
     });
     this.autoSyncQueues.set(parentID, task);
     try { await task; }
