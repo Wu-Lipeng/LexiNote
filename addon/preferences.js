@@ -29,8 +29,9 @@ var LexiNotePreferences = window.LexiNotePreferences = {
           return;
         }
         const filename = await app.findNutstoreWordbookFilename(parent);
+        if (filename && !savedFilename) await app.saveNutstoreFilename(parent, filename);
         status.textContent = filename
-          ? `坚果云中已找到当前词库文件：${filename}`
+          ? savedFilename ? `坚果云中已找到当前词库文件：${filename}` : `坚果云中已找到当前词库文件并已写入本地同步记录：${filename}`
           : savedFilename ? `本地记录的坚果云文件“${savedFilename}”未在坚果云中找到。` : "坚果云中未找到当前词库文件。";
       } catch (e) { status.textContent = `当前词库的坚果云同步记录无法判断：${e.message || "请先打开或选中文献。"}`; }
     };
