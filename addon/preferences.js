@@ -4,7 +4,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     const app = Zotero.LexiNote;
     if (!app || $("settings").dataset.initialized) return;
     $("settings").dataset.initialized = "true";
-    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType", "nutstoreServerUrl"];
+    const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType", "nutstoreServerUrl", "nutstoreAutoSyncDebounce", "nutstoreAutoSyncMinInterval"];
     for (const name of names) $(name).value = app.config[name];
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
@@ -13,6 +13,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("noteLocateMode").value = app.config.noteLocateMode || "select";
     $("showNoteLocateStatus").checked = Boolean(app.config.showNoteLocateStatus);
     $("nutstoreEnabled").checked = Boolean(app.config.nutstoreEnabled);
+    $("nutstoreAutoSync").checked = Boolean(app.config.nutstoreAutoSync);
     const nutstoreCredentials = app.nutstoreCredentials();
     $("nutstoreUsername").value = nutstoreCredentials.username;
     $("nutstorePassword").value = nutstoreCredentials.password;
@@ -63,8 +64,8 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     try { $("key").value = app.getKey(); }
     catch (_) { $("status").textContent = "无法读取凭据存储，请解锁后重新打开设置。"; $("save").disabled = true; }
     const read = () => {
-      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value, showNoteLocateStatus: $("showNoteLocateStatus").checked, nutstoreEnabled: $("nutstoreEnabled").checked };
-      for (const name of names) config[name] = ["delay", "timeout"].includes(name) ? Number($(name).value) : $(name).value;
+      const config = { enabled: $("enabled").checked, autoHighlight: $("autoHighlight").checked, openNoteAfterSave: $("openNoteAfterSave").checked, autoLocateSavedWord: $("autoLocateSavedWord").checked, noteLocateMode: $("noteLocateMode").value, showNoteLocateStatus: $("showNoteLocateStatus").checked, nutstoreEnabled: $("nutstoreEnabled").checked, nutstoreAutoSync: $("nutstoreAutoSync").checked };
+      for (const name of names) config[name] = ["delay", "timeout", "nutstoreAutoSyncDebounce", "nutstoreAutoSyncMinInterval"].includes(name) ? Number($(name).value) : $(name).value;
       config.baiduApiKey = $("baiduApiKey").value.trim(); config.baiduSecretKey = $("baiduSecretKey").value.trim();
       config.useBaiduTrial = $("useBaiduTrial").checked;
       return config;
@@ -293,7 +294,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("provider").addEventListener("change", () => { rememberBaiduCredentials(); previousProvider = $("provider").value; loadBaiduCredentials(); updateFields(); updateTrialStatus(); });
     $("useBaiduTrial").addEventListener("change", () => { updateFields(); updateTrialStatus(); });
     updateFields(); updateTrialStatus();
-    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "nutstoreEnabled", "nutstoreUsername", "nutstorePassword", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
+    const settingControls = [...names, "enabled", "autoHighlight", "openNoteAfterSave", "autoLocateSavedWord", "noteLocateMode", "showNoteLocateStatus", "nutstoreEnabled", "nutstoreAutoSync", "nutstoreUsername", "nutstorePassword", "baiduApiKey", "baiduSecretKey", "useBaiduTrial", "key"];
     for (const id of settingControls) {
       $(id).addEventListener("input", () => { dirty = true; });
       $(id).addEventListener("change", () => { dirty = true; });

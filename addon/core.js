@@ -8,7 +8,8 @@ var LexiNoteCore = (() => {
     meaningPath: "translation", phoneticPath: "", examplePath: "",
     target: "zh-CN", delay: 350, timeout: 12000,
     autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, noteLocateMode: "select", showNoteLocateStatus: false, highlightColor: "#c0c0c0", highlightType: "highlight",
-    nutstoreEnabled: false, nutstoreServerUrl: "https://dav.jianguoyun.com/dav/"
+    nutstoreEnabled: false, nutstoreServerUrl: "https://dav.jianguoyun.com/dav/",
+    nutstoreAutoSync: false, nutstoreAutoSyncDebounce: 5, nutstoreAutoSyncMinInterval: 60
   });
   function wordFrom(text) {
     const value = String(text || "").normalize("NFC").trim()
@@ -71,6 +72,9 @@ var LexiNoteCore = (() => {
     if (typeof c.autoLocateSavedWord !== "boolean") throw new Error("已保存单词定位设置不正确。");
     if (!["off", "click", "select"].includes(c.noteLocateMode)) throw new Error("生词本定位方式不正确。");
     if (typeof c.showNoteLocateStatus !== "boolean") throw new Error("高亮定位提示设置不正确。");
+    if (typeof c.nutstoreAutoSync !== "boolean") throw new Error("坚果云自动同步设置不正确。");
+    if (!Number.isInteger(c.nutstoreAutoSyncDebounce) || c.nutstoreAutoSyncDebounce < 1 || c.nutstoreAutoSyncDebounce > 300) throw new Error("坚果云自动同步防抖延迟应为 1–300 秒。");
+    if (!Number.isInteger(c.nutstoreAutoSyncMinInterval) || c.nutstoreAutoSyncMinInterval < 1 || c.nutstoreAutoSyncMinInterval > 3600) throw new Error("坚果云自动同步最小间隔应为 1–3600 秒。");
     if (!/^#[0-9a-f]{6}$/i.test(c.highlightColor)) throw new Error("标记颜色格式不正确。");
     if (!["highlight", "underline"].includes(c.highlightType)) throw new Error("标记样式不正确。");
     if (["baidu", "baidu-general"].includes(c.provider)) {

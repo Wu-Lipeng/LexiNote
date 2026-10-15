@@ -10,6 +10,9 @@ test('Unicode single words; reject sentences and oversized selection', () => {
   assert.equal(C.defaults.autoLocateSavedWord, true);
   assert.equal(C.defaults.noteLocateMode, 'select');
   assert.equal(C.defaults.showNoteLocateStatus, false);
+  assert.equal(C.defaults.nutstoreAutoSync, false);
+  assert.equal(C.defaults.nutstoreAutoSyncDebounce, 5);
+  assert.equal(C.defaults.nutstoreAutoSyncMinInterval, 60);
   assert.equal(C.defaults.highlightColor, '#c0c0c0');
   for (const word of ['apple', 'café', 'naïve', "don't", 'well-being', '中文']) assert.equal(C.wordFrom(word), word);
   assert.equal(C.wordFrom('“apple,”'), 'apple');
@@ -61,6 +64,9 @@ test('Baidu general mode accepts own credentials or local trial mode', () => {
   assert.throws(() => C.validate({ ...C.defaults, openNoteAfterSave: 'yes' }), /保存后打开生词本/);
   assert.throws(() => C.validate({ ...C.defaults, autoLocateSavedWord: 'yes' }), /已保存单词定位/);
   assert.throws(() => C.validate({ ...C.defaults, showNoteLocateStatus: 'yes' }), /高亮定位提示/);
+  assert.throws(() => C.validate({ ...C.defaults, nutstoreAutoSync: 'yes' }), /坚果云自动同步设置/);
+  assert.throws(() => C.validate({ ...C.defaults, nutstoreAutoSyncDebounce: 0 }), /防抖延迟/);
+  assert.throws(() => C.validate({ ...C.defaults, nutstoreAutoSyncMinInterval: 3601 }), /最小间隔/);
 });
 function runtime(initialConfig = base, credentials = {}) {
   let sent = 0;
@@ -77,7 +83,7 @@ function runtime(initialConfig = base, credentials = {}) {
     Zotero:{Prefs:{get:key=>prefs[key] || '',set:(key,value)=>{prefs[key]=value;}},Libraries:{get:id=>id === 2 ? {libraryType:'group',groupID:99} : {libraryType:'user'}}}, Services:{logins:{findLogins:(_,__,name)=>credentials[name] ? [{password:credentials[name]}] : []}} });
   vm.runInContext(fs.readFileSync(require.resolve('../addon/runtime.js'),'utf8'),context);
   const app = vm.runInContext('new LexiNoteRuntime({id:"test",rootURI:""})',context);
-  return {app,requests,prefs,sent:()=>sent};
+  return {app,requests,prefs,context,sent:()=>sent};
 }
 test('local trial quota resets daily and stops after 50 requests', () => {
   const {app}=runtime(); app.trialDate=()=> '2026-09-16';
@@ -156,6 +162,32 @@ test('Nutstore settings accept the official HTTPS DAV endpoint and per-document 
   assert.equal(app.nutstoreFileUrl('my-wordbook.json'), 'https://dav.jianguoyun.com/dav/LexiNote/my-wordbook.json');
   assert.throws(() => app.nutstoreFilename('folder/wordbook.json'), /文件名/);
   assert.throws(() => app.nutstoreConfig({...config, nutstoreServerUrl:'http://dav.jianguoyun.com/dav/'}), /HTTPS/);
+});
+test('automatic Nutstore sync debounces per wordbook and preserves the configured minimum interval', async () => {
+  const {app}=runtime({...base, nutstoreEnabled:true, nutstoreAutoSync:true, nutstoreAutoSyncDebounce:1, nutstoreAutoSyncMinInterval:2});
+  app.isNutstoreConfigured=()=>true;
+  app.savedNutstoreFilename=async()=> 'paper.json';
+  const parent={id:42}; let queued=0;
+  app.enqueueAutoSync=async id=>{queued++;assert.equal(id,42);};
+  await app.scheduleAutoSync(parent); await app.scheduleAutoSync(parent);
+  await new Promise(resolve=>setTimeout(resolve,1100));
+  assert.equal(queued,1);
+  app.autoSyncLastAt.set(42,Date.now());
+  assert.ok(app.autoSyncDelayMilliseconds(42)>=1900);
+  for (const timer of app.autoSyncTimers.values()) clearTimeout(timer);
+});
+test('item notifications enqueue eligible LexiNote wordbooks for automatic sync', async () => {
+  const {app,context}=runtime({...base, nutstoreEnabled:true, nutstoreAutoSync:true}, {'Nutstore WebDAV Username':'user@example.com','Nutstore WebDAV Password':'app-password'});
+  const note={id:11,parentID:12,deleted:false,hasTag:tag=>tag==='LexiNote:生词本'};
+  const parent={id:12,deleted:false,isRegularItem:()=>true};
+  context.Zotero.Items={getAsync:async id=>Array.isArray(id)?id.map(value=>value===11?note:null):(id===12?parent:null)};
+  const queued=[]; app.scheduleAutoSync=async value=>queued.push(value.id);
+  await app.handleItemNotification('modify','item',[11]);
+  await app.handleItemNotification('modify','item',[99]);
+  assert.deepEqual(queued,[12]);
+  app.suppressAutoSyncForNote(11);
+  await app.handleItemNotification('modify','item',[11]);
+  assert.deepEqual(queued,[12]);
 });
 test('wordbook identity uses a synced item key scoped to its Zotero library', () => {
   const {app}=runtime();

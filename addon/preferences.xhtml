@@ -37,6 +37,12 @@
       <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
         <html:label for="lexinote-nutstoreEnabled">启用同步</html:label>
         <html:label><html:input id="lexinote-nutstoreEnabled" type="checkbox"/> 启用坚果云同步</html:label>
+        <html:label for="lexinote-nutstoreAutoSync">自动同步</html:label>
+        <html:label><html:input id="lexinote-nutstoreAutoSync" type="checkbox"/> 生词本变更后自动上传已同步的词库</html:label>
+        <html:label for="lexinote-nutstoreAutoSyncDebounce">防抖延迟（秒）</html:label>
+        <html:div><html:input id="lexinote-nutstoreAutoSyncDebounce" type="number" min="1" max="300"/><html:small style="display:block">最后一次编辑结束后等待多久再上传。范围为 1–300 秒。</html:small></html:div>
+        <html:label for="lexinote-nutstoreAutoSyncMinInterval">最小同步间隔（秒）</html:label>
+        <html:div><html:input id="lexinote-nutstoreAutoSyncMinInterval" type="number" min="1" max="3600"/><html:small style="display:block">同一词库两次自动上传之间的最短间隔。范围为 1–3600 秒。</html:small></html:div>
         <html:label for="lexinote-nutstoreServerUrl">WebDAV 地址</html:label>
         <html:input id="lexinote-nutstoreServerUrl" type="url" placeholder="https://dav.jianguoyun.com/dav/"/>
         <html:label for="lexinote-nutstoreUsername">坚果云账号</html:label>
@@ -44,7 +50,7 @@
         <html:label for="lexinote-nutstorePassword">应用密码</html:label>
         <html:input id="lexinote-nutstorePassword" type="password" autocomplete="off"/>
       </html:div>
-      <html:p style="margin-bottom:0"><html:small>保存完整设置后，“同步当前词库到坚果云”按钮才可使用。首次同步会提示输入当前文章的文件名；该名称随后会保存到生词本，今后同步将直接更新同名文件。安卓 App 会自动读取 LexiNote 文件夹中的全部词库。</html:small></html:p>
+      <html:p style="margin-bottom:0"><html:small>保存完整设置后，“同步当前词库到坚果云”按钮才可使用。首次同步会提示输入当前文章的文件名；该名称随后会保存到生词本，今后同步将直接更新同名文件。自动同步默认关闭，且仅上传已有同步文件记录的词库，不会自动创建远端文件。安卓 App 会自动读取 LexiNote 文件夹中的全部词库。</html:small></html:p>
     </html:section>
     <html:section id="lexinote-interface-settings" style="margin:16px 0;padding:14px;border:1px solid #8885;border-radius:6px">
       <html:h2 style="margin:0 0 10px;font-size:1.15em">接口设置</html:h2>

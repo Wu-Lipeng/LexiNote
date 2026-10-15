@@ -14,6 +14,13 @@ var LexiNoteRuntime = class {
     this.noteQueue = Promise.resolve();
     this.noteLocatorDocuments = new Map();
     this.exportTextCache = new Map();
+    this.autoSyncTimers = new Map();
+    this.autoSyncQueues = new Map();
+    this.autoSyncLastAt = new Map();
+    this.autoSyncFailures = new Map();
+    this.autoSyncSuppressedNoteIDs = new Map();
+    this.notifierID = null;
+    this.notifierObserver = { notify: (event, type, ids) => { void this.handleItemNotification(event, type, ids); } };
     this.alive = true;
     this.handler = event => this.selection(event);
     this.config = this.readConfig();
@@ -34,7 +41,67 @@ var LexiNoteRuntime = class {
       scripts: [this.rootURI + "preferences.js"]
     });
     Zotero.Reader.registerEventListener("renderTextSelectionPopup", this.handler, this.id);
+    if (Zotero.Notifier?.registerObserver) this.notifierID = Zotero.Notifier.registerObserver(this.notifierObserver, ["item"], "lexinote-auto-sync");
     this.updateNoteLocatorScanning();
+  }
+  autoSyncDelayMilliseconds(parentID) {
+    const debounce = this.config.nutstoreAutoSyncDebounce * 1000;
+    const minimum = this.config.nutstoreAutoSyncMinInterval * 1000;
+    const remaining = Math.max(0, (this.autoSyncLastAt.get(parentID) || 0) + minimum - Date.now());
+    return Math.max(debounce, remaining);
+  }
+  suppressAutoSyncForNote(noteID) {
+    this.autoSyncSuppressedNoteIDs.set(Number(noteID), Date.now() + 60000);
+  }
+  isAutoSyncSuppressed(noteID) {
+    const expiry = this.autoSyncSuppressedNoteIDs.get(Number(noteID));
+    if (!expiry) return false;
+    if (expiry > Date.now()) { this.autoSyncSuppressedNoteIDs.delete(Number(noteID)); return true; }
+    this.autoSyncSuppressedNoteIDs.delete(Number(noteID));
+    return false;
+  }
+  async handleItemNotification(event, type, ids) {
+    if (!this.alive || type !== "item" || !["add", "modify"].includes(event) || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return;
+    const items = await Zotero.Items.getAsync(ids).catch(() => []);
+    for (const note of items) {
+      if (!note || note.deleted || !note.parentID || !note.hasTag?.(this.tag) || this.isAutoSyncSuppressed(note.id)) continue;
+      const parent = await Zotero.Items.getAsync(note.parentID).catch(() => null);
+      if (parent?.isRegularItem?.() && !parent.deleted) void this.scheduleAutoSync(parent);
+    }
+  }
+  async scheduleAutoSync(parent) {
+    if (!this.alive || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return false;
+    const filename = await this.savedNutstoreFilename(parent);
+    // Automatic sync must never create a remote file: the first upload remains
+    // an explicit user action that records its filename in the wordbook.
+    if (!filename) return false;
+    const parentID = Number(parent.id);
+    clearTimeout(this.autoSyncTimers.get(parentID));
+    const delay = this.autoSyncDelayMilliseconds(parentID);
+    this.autoSyncTimers.set(parentID, setTimeout(() => {
+      this.autoSyncTimers.delete(parentID);
+      void this.enqueueAutoSync(parentID);
+    }, delay));
+    return true;
+  }
+  async enqueueAutoSync(parentID) {
+    const prior = this.autoSyncQueues.get(parentID) || Promise.resolve();
+    const task = prior.catch(() => {}).then(async () => {
+      if (!this.alive || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return;
+      const parent = await Zotero.Items.getAsync(parentID);
+      if (!parent || parent.deleted || !parent.isRegularItem?.()) return;
+      const filename = await this.savedNutstoreFilename(parent);
+      if (!filename) return;
+      const remaining = this.autoSyncDelayMilliseconds(parentID) - this.config.nutstoreAutoSyncDebounce * 1000;
+      if (remaining > 0) { await new Promise(resolve => setTimeout(resolve, remaining)); }
+      await this.syncWordbookToNutstore(parent, filename, false);
+      this.autoSyncLastAt.set(parentID, Date.now());
+      this.autoSyncFailures.delete(parentID);
+    });
+    this.autoSyncQueues.set(parentID, task);
+    try { await task; }
+    catch (error) { this.autoSyncFailures.set(parentID, String(error?.message || error)); }
+    finally { if (this.autoSyncQueues.get(parentID) === task) this.autoSyncQueues.delete(parentID); }
   }
   getKey() {
     return this.getCredential("Generic API Key") || this.getCredential("API key");
@@ -999,6 +1066,7 @@ var LexiNoteRuntime = class {
       const root = document.body.querySelector("div[data-schema-version]") || document.body;
       root.dataset.lexinoteNutstoreFilename = safeFilename;
       note.setNote(document.body.innerHTML);
+      this.suppressAutoSyncForNote(note.id);
       await note.saveTx();
       saved++;
     }
@@ -1008,6 +1076,10 @@ var LexiNoteRuntime = class {
   async syncCurrentWordbookToNutstore(filename) {
     if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
     const parent = await this.exportParentItem();
+    return this.syncWordbookToNutstore(parent, filename, true);
+  }
+  async syncWordbookToNutstore(parent, filename, saveFilename = true) {
+    if (!this.isNutstoreConfigured()) throw new Error("请先保存完整的坚果云 WebDAV 设置。");
     const wordbook = await this.exportWordbook(parent);
     const credentials = this.nutstoreCredentials();
     const auth = btoa(unescape(encodeURIComponent(`${credentials.username}:${credentials.password}`)));
@@ -1024,7 +1096,7 @@ var LexiNoteRuntime = class {
       if (status === 401 || status === 403) throw new Error("坚果云拒绝访问，请检查账号与第三方应用密码。");
       throw new Error(`同步到坚果云失败：${error?.message || "网络请求失败"}`);
     }
-    await this.saveNutstoreFilename(parent, filename);
+    if (saveFilename) await this.saveNutstoreFilename(parent, filename);
     return { entries: wordbook.entries.length, url, filename };
   }
   updateSavedWordFormat(document, root, heading, originalWord, attachment, pageLabel, pageIndex, annotationID = "", replaceOriginalWord = false) {
@@ -1637,6 +1709,10 @@ var LexiNoteRuntime = class {
   stop() {
     this.alive = false;
     Zotero.Reader.unregisterEventListener("renderTextSelectionPopup", this.handler);
+    if (this.notifierID != null) Zotero.Notifier?.unregisterObserver?.(this.notifierID);
+    this.notifierID = null;
+    for (const timer of this.autoSyncTimers.values()) clearTimeout(timer);
+    this.autoSyncTimers.clear();
     clearInterval(this.noteLocatorTimer);
     this.noteLocatorTimer = null;
     this.clearNoteLocators();
