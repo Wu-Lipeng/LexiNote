@@ -61,6 +61,7 @@ var LexiNoteRuntime = class {
     const delay = this.autoSyncDelayMilliseconds(parentID);
     this.autoSyncTimers.set(parentID, setTimeout(() => {
       this.autoSyncTimers.delete(parentID);
+      this.showAutoSyncNotice("LexiNote 自动同步", "等待结束，正在上传当前词库到坚果云…");
       void this.enqueueAutoSync(parentID);
     }, delay));
     return true;
