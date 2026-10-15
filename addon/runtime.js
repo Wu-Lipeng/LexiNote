@@ -1012,7 +1012,7 @@ var LexiNoteRuntime = class {
       const values = raw.length && typeof raw[0] === "object" ? raw : await Zotero.Items.getAsync(raw);
       const expectedColor = String(this.config.highlightColor || "").toLowerCase();
       const seen = new Set();
-      return values.flatMap(annotation => {
+      return values.flatMap((annotation, sourceIndex) => {
         let position;
         try { position = typeof annotation.annotationPosition === "string" ? JSON.parse(annotation.annotationPosition) : annotation.annotationPosition; }
         catch (_) { return []; }
@@ -1022,9 +1022,87 @@ var LexiNoteRuntime = class {
         if (!id || annotation.annotationType !== this.config.highlightType || String(annotation.annotationColor || "").toLowerCase() !== expectedColor
           || !word || !Number.isInteger(pageIndex) || seen.has(id)) return [];
         seen.add(id);
-        return [{ id, word: String(word), normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(annotation.annotationPageLabel || pageIndex + 1) }];
-      });
+        return [{ id, word: String(word), normalizedWord: LexiNoteCore.normalize(word), pageIndex, pageLabel: String(annotation.annotationPageLabel || pageIndex + 1), sortKey: this.highlightSortKey(position, sourceIndex) }];
+      }).sort((left, right) => this.compareHighlightOrder(left, right));
     } catch (_) { return []; }
+  }
+  highlightSortKey(position, sourceIndex = 0) {
+    const rects = Array.isArray(position?.rects) ? position.rects : [];
+    const firstRect = rects.find(rect => Array.isArray(rect) && rect.length >= 4) || [];
+    const x = Math.min(Number(firstRect[0]), Number(firstRect[2]));
+    const y = Math.max(Number(firstRect[1]), Number(firstRect[3]));
+    return {
+      pageIndex: Number.isInteger(position?.pageIndex) ? position.pageIndex : Number.MAX_SAFE_INTEGER,
+      top: Number.isFinite(y) ? y : -Infinity,
+      left: Number.isFinite(x) ? x : Infinity,
+      sourceIndex
+    };
+  }
+  compareHighlightOrder(left, right) {
+    const a = left.sortKey || {}, b = right.sortKey || {};
+    return (a.pageIndex - b.pageIndex) || (b.top - a.top) || (a.left - b.left)
+      || ((a.sourceIndex || 0) - (b.sourceIndex || 0));
+  }
+  wordbookSections(root) {
+    const headings = this.wordHeadings(root);
+    return headings.map((heading, index) => {
+      const nodes = [heading];
+      for (let node = heading.nextSibling; node && node !== headings[index + 1]; node = node.nextSibling) nodes.push(node);
+      return { heading, nodes, index };
+    });
+  }
+  reorderWordbookSections(root, highlights) {
+    const sections = this.wordbookSections(root);
+    const rankByAnnotation = new Map(highlights.map((highlight, index) => [highlight.id, index]));
+    const ranksByWord = new Map();
+    for (let index = 0; index < highlights.length; index++) {
+      const ranks = ranksByWord.get(highlights[index].normalizedWord) || [];
+      ranks.push(index); ranksByWord.set(highlights[index].normalizedWord, ranks);
+    }
+    let matched = 0;
+    for (const section of sections) {
+      const entry = this.headingMatchData(section.heading);
+      let rank = rankByAnnotation.get(entry.annotationID);
+      if (rank === undefined) {
+        const ranks = ranksByWord.get(entry.normalizedWord) || ranksByWord.get(entry.normalizedOriginalWord) || [];
+        if (ranks.length === 1) rank = ranks[0];
+      }
+      if (rank !== undefined) { section.rank = rank; matched++; }
+    }
+    const ordered = [...sections].sort((left, right) => {
+      const leftRank = left.rank === undefined ? Infinity : left.rank;
+      const rightRank = right.rank === undefined ? Infinity : right.rank;
+      return (leftRank - rightRank) || left.index - right.index;
+    });
+    const moved = sections.reduce((count, section, index) => count + (section !== ordered[index] ? 1 : 0), 0);
+    if (!moved) return { matched, moved: 0 };
+    const anchor = sections.at(-1).nodes.at(-1).nextSibling;
+    const fragment = root.ownerDocument.createDocumentFragment();
+    for (const section of ordered) for (const node of section.nodes) fragment.append(node);
+    root.insertBefore(fragment, anchor);
+    return { matched, moved };
+  }
+  async sortCurrentWordbookByHighlights() {
+    const reader = this.currentPDFReader();
+    if (!reader?.itemID) throw new Error("请先在 Zotero 主窗口中打开并选中一个 PDF。");
+    const attachment = await Zotero.Items.getAsync(reader.itemID);
+    if (!attachment?.parentID) throw new Error("当前 PDF 没有可用的父文献，无法查找生词本。");
+    const highlights = await this.currentFormatHighlights(attachment);
+    const parent = await Zotero.Items.getAsync(attachment.parentID);
+    if (!parent || parent.deleted) throw new Error("找不到当前 PDF 所属的文献。");
+    const notes = await Zotero.Items.getAsync(parent.getNotes());
+    const parser = new DOMParser();
+    let matched = 0, moved = 0, updated = 0;
+    for (const note of notes) {
+      if (note.deleted || !note.hasTag(this.tag)) continue;
+      if (!note.isEditable?.()) throw new Error("生词本笔记不可编辑，无法排序。");
+      const document = parser.parseFromString(note.getNote(), "text/html");
+      const root = document.body.querySelector("div[data-schema-version]") || document.body;
+      const result = this.reorderWordbookSections(root, highlights);
+      matched += result.matched; moved += result.moved;
+      if (result.moved) { note.setNote(document.body.innerHTML); await note.saveTx(); updated++; }
+    }
+    return { parent, scanned: highlights.length, matched, moved, updated, changed: moved > 0 };
   }
   async syncCurrentPDFHighlightsToNotebook() {
     const reader = this.currentPDFReader();

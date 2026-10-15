@@ -197,7 +197,17 @@ test('current-format highlights only include configured single-word annotations'
     {key:'three',annotationType:'highlight',annotationColor:'#ff0000',annotationText:'skip',annotationPosition:'{"pageIndex":4}'},
     {key:'four',annotationType:'highlight',annotationColor:'#c0c0c0',annotationText:'two words',annotationPosition:'{"pageIndex":5}'}
   ]};
-  assert.deepEqual(JSON.parse(JSON.stringify(await app.currentFormatHighlights(attachment))), [{id:'one',word:'Present',normalizedWord:'present',pageIndex:2,pageLabel:'3'}]);
+  assert.deepEqual(JSON.parse(JSON.stringify((await app.currentFormatHighlights(attachment)).map(({id,word,normalizedWord,pageIndex,pageLabel})=>({id,word,normalizedWord,pageIndex,pageLabel})))), [{id:'one',word:'Present',normalizedWord:'present',pageIndex:2,pageLabel:'3'}]);
+});
+test('current-format highlights are ordered by page, then top-to-bottom and left-to-right', async () => {
+  const {app}=runtime();
+  const attachment={getAnnotations:()=>[
+    {key:'lower',annotationType:'highlight',annotationColor:'#c0c0c0',annotationText:'lower',annotationPosition:'{"pageIndex":0,"rects":[[30,20,40,10]]}'},
+    {key:'right',annotationType:'highlight',annotationColor:'#c0c0c0',annotationText:'right',annotationPosition:'{"pageIndex":0,"rects":[[30,80,40,70]]}'},
+    {key:'left',annotationType:'highlight',annotationColor:'#c0c0c0',annotationText:'left',annotationPosition:'{"pageIndex":0,"rects":[[10,80,20,70]]}'},
+    {key:'next-page',annotationType:'highlight',annotationColor:'#c0c0c0',annotationText:'next',annotationPosition:'{"pageIndex":1,"rects":[[10,90,20,80]]}'}
+  ]};
+  assert.deepEqual(JSON.parse(JSON.stringify((await app.currentFormatHighlights(attachment)).map(item=>item.id))), ['left','right','lower','next-page']);
 });
 test('candidate lookup keeps successful spellings and reports no usable result', async () => {
   const {app}=runtime();
