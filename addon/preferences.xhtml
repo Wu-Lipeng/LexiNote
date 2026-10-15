@@ -30,8 +30,9 @@
     </html:section>
     <html:section id="lexinote-nutstore-settings" style="margin:16px 0;padding:14px;border:1px solid #8885;border-radius:6px">
       <html:h2 style="margin:0 0 10px;font-size:1.15em">坚果云同步</html:h2>
-      <html:p style="margin-bottom:0"><html:button id="lexinote-exportWordbook" type="button">导出生词本 JSON</html:button> <html:button id="lexinote-syncWordbook" type="button">同步当前词库到坚果云</html:button> <html:small>导出当前 Zotero 文献的 LexiNote 词条；也可同步到坚果云，供安卓记词 App 自动读取。</html:small></html:p>
+      <html:p style="margin-bottom:0"><html:button id="lexinote-exportWordbook" type="button">导出生词本 JSON</html:button> <html:small>导出当前 Zotero 文献的 LexiNote 词条。</html:small></html:p>
       <html:p id="lexinote-nutstoreSyncFileStatus" role="status" style="margin:8px 0 0">正在读取当前词库的坚果云同步记录…</html:p>
+      <html:p style="margin-bottom:0"><html:button id="lexinote-syncWordbook" type="button">同步当前词库到坚果云</html:button> <html:small>将当前词库上传到坚果云，供安卓记词 App 自动读取。</html:small></html:p>
       <html:p>使用坚果云 WebDAV 同步一个 JSON 词库文件。请使用坚果云的“第三方应用密码”，不要填写登录密码。</html:p>
       <html:div style="display:grid;grid-template-columns:115px minmax(220px,1fr);gap:10px;align-items:start">
         <html:label for="lexinote-nutstoreEnabled">启用同步</html:label>
