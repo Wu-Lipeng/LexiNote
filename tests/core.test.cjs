@@ -176,6 +176,16 @@ test('automatic Nutstore sync debounces per wordbook and preserves the configure
   assert.ok(app.autoSyncDelayMilliseconds(42)>=1900);
   for (const timer of app.autoSyncTimers.values()) clearTimeout(timer);
 });
+test('automatic Nutstore sync restores a missing local filename mapping before queuing', async () => {
+  const {app}=runtime({...base, nutstoreEnabled:true, nutstoreAutoSync:true, nutstoreAutoSyncDebounce:1, nutstoreAutoSyncMinInterval:1});
+  app.isNutstoreConfigured=()=>true;
+  app.savedNutstoreFilename=async()=> '';
+  app.findNutstoreWordbookFilename=async()=> 'recovered.json';
+  let saved=''; app.saveNutstoreFilename=async (_parent, filename)=>{saved=filename;};
+  assert.equal(await app.scheduleAutoSync({id:43}),true);
+  assert.equal(saved,'recovered.json');
+  for (const timer of app.autoSyncTimers.values()) clearTimeout(timer);
+});
 test('plugin-originated automatic sync queues the changed wordbook without a global notifier', async () => {
   const {app}=runtime(); const queued=[];
   app.scheduleAutoSync=async parent=>queued.push(parent.id);

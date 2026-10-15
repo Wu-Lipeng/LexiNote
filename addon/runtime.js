@@ -48,10 +48,14 @@ var LexiNoteRuntime = class {
   }
   async scheduleAutoSync(parent) {
     if (!this.alive || !this.config.nutstoreAutoSync || !this.isNutstoreConfigured()) return false;
-    const filename = await this.savedNutstoreFilename(parent);
+    let filename = await this.savedNutstoreFilename(parent);
     // Automatic sync must never create a remote file: the first upload remains
     // an explicit user action that records its filename in the wordbook.
-    if (!filename) return false;
+    if (!filename) {
+      filename = await this.findNutstoreWordbookFilename(parent);
+      if (!filename) return false;
+      await this.saveNutstoreFilename(parent, filename);
+    }
     const parentID = Number(parent.id);
     clearTimeout(this.autoSyncTimers.get(parentID));
     const delay = this.autoSyncDelayMilliseconds(parentID);
