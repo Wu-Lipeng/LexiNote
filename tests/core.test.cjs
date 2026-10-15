@@ -193,6 +193,10 @@ test('plugin-originated automatic sync queues the changed wordbook without a glo
   await new Promise(resolve=>setImmediate(resolve));
   assert.deepEqual(queued,[12]);
 });
+test('automatic sync has an independent hard timeout for stalled WebDAV requests', async () => {
+  const {app}=runtime();
+  await assert.rejects(app.autoSyncWithTimeout(new Promise(()=>{}), 5), /超过 45 秒/);
+});
 test('wordbook identity uses a synced item key scoped to its Zotero library', () => {
   const {app}=runtime();
   assert.deepEqual(JSON.parse(JSON.stringify(app.wordbookIdentity({libraryID:1,key:'PARENT01'}))), {zoteroLibrary:'user',zoteroItemKey:'PARENT01'});

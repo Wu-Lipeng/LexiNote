@@ -81,6 +81,15 @@ var LexiNoteRuntime = class {
     try { Services.prompt.alert(Zotero.getMainWindow?.(), title, message); }
     catch (_) {}
   }
+  async autoSyncWithTimeout(promise, milliseconds = 45000) {
+    let timer;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error("自动同步等待 WebDAV 响应超过 45 秒，已停止本次上传。")), milliseconds); })
+      ]);
+    } finally { clearTimeout(timer); }
+  }
   async enqueueAutoSync(parentID) {
     const prior = this.autoSyncQueues.get(parentID) || Promise.resolve();
     const task = prior.catch(() => {}).then(async () => {
@@ -91,7 +100,7 @@ var LexiNoteRuntime = class {
       if (!filename) return;
       const remaining = this.autoSyncDelayMilliseconds(parentID) - this.config.nutstoreAutoSyncDebounce * 1000;
       if (remaining > 0) { await new Promise(resolve => setTimeout(resolve, remaining)); }
-      const result = await this.syncWordbookToNutstore(parent, filename, false);
+      const result = await this.autoSyncWithTimeout(this.syncWordbookToNutstore(parent, filename, false));
       this.autoSyncLastAt.set(parentID, Date.now());
       this.autoSyncFailures.delete(parentID);
       // Temporary beta diagnostic: make automatic-sync state visible until the
