@@ -1047,14 +1047,16 @@ var LexiNoteRuntime = class {
   }
   async promptNutstoreFilename(window) {
     const parent = await this.exportParentItem();
-    const input = { value: this.wordbookFilename(parent) };
-    while (Services.prompt.prompt(window, "同步当前词库到坚果云", "请输入本篇文章的同步文件名（可省略 .json）：", input, null, {})) {
-      try { return this.nutstoreFilename(input.value); }
+    let filename = this.wordbookFilename(parent);
+    while (true) {
+      const value = window.prompt("请输入本篇文章的同步文件名（可省略 .json）：", filename);
+      if (value === null) throw new Error("已取消坚果云同步。");
+      try { return this.nutstoreFilename(value); }
       catch (error) {
-        Services.prompt.alert(window, "同步文件名无效", error?.message || "请输入有效的同步文件名。");
+        filename = value;
+        window.alert(`同步文件名无效：\n${error?.message || "请输入有效的同步文件名。"}`);
       }
     }
-    throw new Error("已取消坚果云同步。");
   }
   async savedNutstoreFilename(parent) {
     const values = new Set();
