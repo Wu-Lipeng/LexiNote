@@ -48,7 +48,7 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
+private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, SETTINGS }
 
 @Composable private fun LexiNoteApp() {
     val context = androidx.compose.ui.platform.LocalContext.current
@@ -140,6 +140,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             onReviewAll = { reviewMode = ReviewMode.ALL; page = Page.REVIEW },
             onReviewMarked = { reviewMode = ReviewMode.MARKED; page = Page.REVIEW },
             onLibrary = { page = Page.LIBRARY },
+            onManageStudyScope = { page = Page.STUDY_SCOPE },
             onSettings = { page = Page.SETTINGS },
             onUpdate = installUpdate
         )
@@ -161,22 +162,25 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
         Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
         Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
         Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.WORDBOOK }) }
-        Page.SETTINGS -> NutstoreSettingsPage(
-            repository = nutstoreSettings,
+        Page.STUDY_SCOPE -> StudyScopePage(
             books = books,
             studyScope = studyScope,
+            onBack = { page = Page.HOME },
+            onStudyScopeChanged = { scope -> studyScope = scope; studyScopeRepository.save(scope) }
+        )
+        Page.SETTINGS -> NutstoreSettingsPage(
+            repository = nutstoreSettings,
             syncMessage = syncMessage,
             betaUpdateState = betaUpdateState,
             onBack = { page = Page.HOME },
             onSync = syncFromNutstore,
-            onStudyScopeChanged = { scope -> studyScope = scope; studyScopeRepository.save(scope) },
             onCheckBeta = checkBetaUpdate,
             onUpdate = installUpdate
         )
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
     val marked = entries.count { it.marked }
     Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "设置") } }) }) { padding ->
@@ -193,6 +197,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             OutlinedButton(onClick = onReviewMarked, Modifier.fillMaxWidth(), enabled = marked > 0) { Icon(Icons.Default.Bookmark, null); Spacer(Modifier.width(8.dp)); Text("复习标记单词（$marked）") }
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
+            OutlinedButton(onClick = onManageStudyScope, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("管理背词词库") }
         }
     }
 }
@@ -232,7 +237,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
     }
 }
 
-@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, books: List<StoredWordbook>, studyScope: StudyScope, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onStudyScopeChanged: (StudyScope) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     var config by remember { mutableStateOf(repository.load()) }
     var saveStatus by remember { mutableStateOf("") }
     Scaffold(topBar = { BackBar("设置", onBack) }) { padding ->
@@ -258,13 +263,25 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
             }
             (syncMessage.ifBlank { saveStatus }).takeIf { it.isNotBlank() }?.let { item { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
+            item { Text("测试版", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("测试版包含尚未正式发布的功能，需要由你主动检查并安装。", style = MaterialTheme.typography.bodyMedium) }
+            item { BetaUpdateBanner(betaUpdateState, onCheckBeta, onUpdate) }
+            item {
+                val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
+                Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
+            }
+        }
+    }
+}
+
+@Composable private fun StudyScopePage(books: List<StoredWordbook>, studyScope: StudyScope, onBack: () -> Unit, onStudyScopeChanged: (StudyScope) -> Unit) {
+    Scaffold(topBar = { BackBar("管理背词词库", onBack) }) { padding ->
+        LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("背词范围", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("首页待复习数量和开始复习的内容，仅包含这里选定的生词本。", style = MaterialTheme.typography.bodyMedium) }
             item {
                 Row(Modifier.fillMaxWidth().clickable {
-                    onStudyScopeChanged(
-                        if (studyScope.useAllBooks) StudyScope(false, books.map { it.id }.toSet()) else StudyScope(true)
-                    )
+                    onStudyScopeChanged(if (studyScope.useAllBooks) StudyScope(false, books.map { it.id }.toSet()) else StudyScope(true))
                 }, verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(studyScope.useAllBooks, onCheckedChange = { checked ->
                         onStudyScopeChanged(if (checked) StudyScope(true) else StudyScope(false, books.map { it.id }.toSet()))
@@ -290,14 +307,6 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, SETTINGS }
                         }
                     }
                 }
-            }
-            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
-            item { Text("测试版", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
-            item { Text("测试版包含尚未正式发布的功能，需要由你主动检查并安装。", style = MaterialTheme.typography.bodyMedium) }
-            item { BetaUpdateBanner(betaUpdateState, onCheckBeta, onUpdate) }
-            item {
-                val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
-                Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
             }
         }
     }
