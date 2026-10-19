@@ -170,8 +170,10 @@ var LexiNoteRuntime = class {
     } catch (_) { return false; }
   }
   nutstoreFilename(value) {
-    const filename = String(value || "").trim();
-    if (!/^[^\\/\\\\\u0000-\u001F]+\.json$/i.test(filename) || filename === ".json") throw new Error("同步文件名必须是不含路径的 .json 文件名。");
+    let filename = String(value || "").trim();
+    if (!filename || /[\\/\\\\\u0000-\u001F]/.test(filename)) throw new Error("同步文件名不能为空，且不能包含路径或控制字符。");
+    if (!/\.json$/i.test(filename)) filename += ".json";
+    if (filename === ".json") throw new Error("同步文件名不能为空。");
     return filename;
   }
   nutstoreFolderUrl(config = this.config) {
@@ -1046,8 +1048,13 @@ var LexiNoteRuntime = class {
   async promptNutstoreFilename(window) {
     const parent = await this.exportParentItem();
     const input = { value: this.wordbookFilename(parent) };
-    if (!Services.prompt.prompt(window, "同步当前词库到坚果云", "请输入本篇文章的同步文件名（.json）：", input, null, {})) throw new Error("已取消坚果云同步。");
-    return this.nutstoreFilename(input.value);
+    while (Services.prompt.prompt(window, "同步当前词库到坚果云", "请输入本篇文章的同步文件名（可省略 .json）：", input, null, {})) {
+      try { return this.nutstoreFilename(input.value); }
+      catch (error) {
+        Services.prompt.alert(window, "同步文件名无效", error?.message || "请输入有效的同步文件名。");
+      }
+    }
+    throw new Error("已取消坚果云同步。");
   }
   async savedNutstoreFilename(parent) {
     const values = new Set();
