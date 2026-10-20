@@ -4,6 +4,8 @@ import android.content.Context
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.time.Instant
+import java.util.UUID
 
 @Serializable data class StoredWordbook(val id: String, val title: String, val entries: List<WordEntry>)
 
@@ -17,6 +19,36 @@ class WordbookRepository(context: Context) {
     }
     fun load(): List<WordEntry> = loadBooks().flatMap { it.entries }
     private fun saveBooks(books: List<StoredWordbook>) { prefs.edit().putString("wordbooks", json.encodeToString(books)).remove("entries").apply() }
+    fun createBook(title: String): StoredWordbook {
+        val name = title.trim()
+        require(name.isNotBlank()) { "请输入词库名称" }
+        require(loadBooks().none { it.title.equals(name, ignoreCase = true) }) { "已存在同名词库" }
+        val book = StoredWordbook("manual-${UUID.randomUUID()}", name, emptyList())
+        saveBooks((loadBooks() + book).sortedBy { it.title.lowercase() })
+        return book
+    }
+    fun saveDictionaryEntry(bookId: String, result: DictionaryResult) {
+        val books = loadBooks().toMutableList()
+        val index = books.indexOfFirst { it.id == bookId }
+        require(index >= 0) { "词库不存在" }
+        val existing = books[index].entries.firstOrNull { it.normalizedWord.equals(result.word, ignoreCase = true) }
+        val entry = WordEntry(
+            id = existing?.id ?: "manual-${UUID.randomUUID()}",
+            word = result.word,
+            normalizedWord = result.word.lowercase(),
+            originalWord = result.word,
+            phonetic = result.phonetic,
+            meanings = result.meanings,
+            example = result.examples.firstOrNull().orEmpty(),
+            createdAt = existing?.createdAt ?: Instant.now().toString(),
+            savedDate = existing?.savedDate ?: Instant.now().toString(),
+            review = existing?.review ?: Review(),
+            marked = existing?.marked ?: false,
+            tags = existing?.tags ?: emptyList()
+        )
+        books[index] = books[index].copy(entries = (books[index].entries.filterNot { it.id == entry.id } + entry).sortedBy { it.word.lowercase() })
+        saveBooks(books)
+    }
     fun import(content: String, bookId: String = "local-import", title: String = "本地导入"): Int {
         val file = json.decodeFromString<LexiNoteExport>(content)
         require(file.format == "lexinote-wordbook" && file.schemaVersion == 1) { "不是 LexiNote schema v1 导出文件" }

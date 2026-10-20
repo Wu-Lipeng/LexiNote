@@ -24,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Refresh
@@ -129,6 +130,22 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         }
         Unit
     }
+    val checkStableUpdate: () -> Unit = {
+        appScope.launch {
+            updateState = UpdateState.Checking
+            updateState = runCatching { ReleaseUpdateRepository.checkForUpdate(BuildConfig.GITHUB_REPOSITORY) }
+                .fold(
+                    onSuccess = { update -> update?.let(UpdateState::Available) ?: UpdateState.UpToDate },
+                    onFailure = { error -> UpdateState.Failed(error.message ?: "无法连接 GitHub") }
+                )
+        }
+        Unit
+    }
+    val createWordbook: (String) -> Result<StoredWordbook> = { title -> runCatching { repo.createBook(title) }.onSuccess { books = repo.loadBooks() } }
+    val saveDictionaryEntry: (DictionaryResult, String) -> Result<Unit> = { result, bookId -> runCatching {
+        repo.saveDictionaryEntry(bookId, result)
+        entries = repo.load(); books = repo.loadBooks()
+    } }
     val installUpdate: (UpdateInfo) -> Unit = { update ->
         if (!UpdateInstaller.canInstall(context)) {
             Toast.makeText(context, "请允许 LexiNote 安装未知来源应用后重试", Toast.LENGTH_LONG).show()
@@ -152,11 +169,15 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             onSettings = { page = Page.SETTINGS },
             dictionaryConfig = dictionaryConfig,
             searchHistory = searchHistory,
+            books = books,
             onLookup = { word, onResult -> appScope.launch {
                 val lookup = runCatching { BaiduDictionaryRepository.lookup(word, dictionaryConfig) }
                 lookup.onSuccess { result -> searchHistory = dictionaryHistory.record(result.word, dictionaryConfig.historyLimit) }
                 onResult(lookup)
             } },
+            onSaveToBook = saveDictionaryEntry,
+            onCreateBook = createWordbook,
+            onCheckUpdate = checkStableUpdate,
             onUpdate = installUpdate
         )
         Page.REVIEW -> ReviewPage(
@@ -174,7 +195,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             entries = repo.load()
             books = repo.loadBooks()
         }
-        Page.LIBRARY -> Library(books, importFile, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
+        Page.LIBRARY -> Library(books, importFile, createWordbook, onBack = { page = Page.HOME }) { book -> selectedBook = book; page = Page.WORDBOOK }
         Page.WORDBOOK -> selectedBook?.let { WordbookEntries(it, onBack = { page = Page.LIBRARY }) { entry -> selected = entry; page = Page.DETAIL } }
         Page.DETAIL -> selected?.let { Detail(it, onBack = { page = Page.WORDBOOK }) }
         Page.STUDY_SCOPE -> StudyScopePage(
@@ -197,7 +218,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, dictionaryConfig: BaiduDictionaryConfig, searchHistory: List<String>, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, dictionaryConfig: BaiduDictionaryConfig, searchHistory: List<String>, books: List<StoredWordbook>, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onSaveToBook: (DictionaryResult, String) -> Result<Unit>, onCreateBook: (String) -> Result<StoredWordbook>, onCheckUpdate: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
     val marked = entries.count { it.marked }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -205,7 +226,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         Column(Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = selectedTab) { listOf("背词", "查词").forEachIndexed { index, title -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) }) } }
             if (selectedTab == 1) {
-                DictionaryLookupPage(dictionaryConfig, searchHistory, onSettings, onLookup, Modifier.weight(1f))
+                DictionaryLookupPage(dictionaryConfig, searchHistory, books, onSettings, onLookup, onSaveToBook, onCreateBook, Modifier.weight(1f))
                 return@Scaffold
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -214,7 +235,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                 Column(Modifier.padding(20.dp)) { Text("今日待复习", style = MaterialTheme.typography.labelLarge); Text("$due", style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold); Text("共 ${entries.size} 个词条") }
             }
-            UpdateBanner(updateState, onUpdate)
+            UpdateBanner(updateState, onCheckUpdate, onUpdate)
             syncMessage.takeIf { it.isNotBlank() }?.let { Text(it, color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) }
             Button(onClick = onReview, Modifier.fillMaxWidth(), enabled = due > 0) { Icon(Icons.Default.Refresh, null); Spacer(Modifier.width(8.dp)); Text("开始复习") }
             OutlinedButton(onClick = onReviewAll, Modifier.fillMaxWidth(), enabled = entries.isNotEmpty()) { Text("全部复习") }
@@ -227,11 +248,13 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, searchHistory: List<String>, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, modifier: Modifier = Modifier) {
+@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, searchHistory: List<String>, books: List<StoredWordbook>, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onSaveToBook: (DictionaryResult, String) -> Result<Unit>, onCreateBook: (String) -> Result<StoredWordbook>, modifier: Modifier = Modifier) {
     var word by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf<DictionaryResult?>(null) }
     var message by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
+    var savingResult by remember { mutableStateOf<DictionaryResult?>(null) }
+    var creatingBookForResult by remember { mutableStateOf<DictionaryResult?>(null) }
     fun query(queryWord: String = word) {
         word = queryWord
         loading = true; result = null; message = "正在查词…"
@@ -242,7 +265,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         item { Text("输入英文单词，获取音标、词性释义和例句。", color = Color(0xFF6A706C)) }
         item { OutlinedTextField(word, { newWord -> word = newWord }, Modifier.fillMaxWidth(), label = { Text("英文单词") }, singleLine = true, enabled = !loading) }
         if (searchHistory.isNotEmpty()) {
-            item { Text("最近搜索", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+            item { Text("历史记录", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
             items(searchHistory, key = { it.lowercase() }) { previousWord ->
                 ListItem(headlineContent = { Text(previousWord) }, modifier = Modifier.fillMaxWidth().clickable(enabled = !loading && config.isConfigured()) { query(previousWord) })
                 HorizontalDivider()
@@ -257,8 +280,28 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             lookup.phonetic.takeIf { it.isNotBlank() }?.let { item { Text("/$it/", style = MaterialTheme.typography.titleMedium, color = Color(0xFF6A706C)) } }
             item { Text(lookup.meanings.joinToString("\n"), style = MaterialTheme.typography.titleMedium) }
             if (lookup.examples.isNotEmpty()) item { Text("例句\n${lookup.examples.joinToString("\n") { "• $it" }}") }
+            item { Button(onClick = { savingResult = lookup }, modifier = Modifier.fillMaxWidth()) { Text("保存到词库") } }
         }
     }
+    savingResult?.let { lookup -> WordbookPickerDialog(
+        books = books,
+        onDismiss = { savingResult = null },
+        onCreateBook = { creatingBookForResult = lookup },
+        onSelect = { book ->
+            onSaveToBook(lookup, book.id).onSuccess { message = "已保存到“${book.title}”" }.onFailure { message = it.message ?: "保存失败" }
+            savingResult = null
+        }
+    ) }
+    creatingBookForResult?.let { lookup -> CreateWordbookDialog(
+        onDismiss = { creatingBookForResult = null },
+        onCreate = { title ->
+            onCreateBook(title).onSuccess { book ->
+                onSaveToBook(lookup, book.id).onSuccess { message = "已新建“${book.title}”并保存" }.onFailure { message = it.message ?: "保存失败" }
+                creatingBookForResult = null
+                savingResult = null
+            }.onFailure { message = it.message ?: "新建词库失败" }
+        }
+    ) }
 }
 
 @Composable private fun BetaUpdateBanner(state: UpdateState?, onCheck: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
@@ -266,7 +309,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         null -> OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth()) { Text("使用最新测试版") }
         UpdateState.Checking -> Text("正在检查最新测试版…", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
         UpdateState.UpToDate -> Text("暂无可安装的更新测试版", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
-        is UpdateState.Failed -> Text("无法检查测试版：${state.reason}", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Failed -> Row(verticalAlignment = Alignment.CenterVertically) { Text("无法检查测试版：${state.reason}", modifier = Modifier.weight(1f), color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall); TextButton(onClick = onCheck) { Text("重试") } }
         is UpdateState.Available -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF2D8))) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -279,11 +322,11 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun UpdateBanner(state: UpdateState, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun UpdateBanner(state: UpdateState, onCheck: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     when (state) {
         UpdateState.Checking -> Text("正在检查更新…", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
         UpdateState.UpToDate -> Text("当前已是最新版本", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
-        is UpdateState.Failed -> Text("无法检查更新：${state.reason}", color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall)
+        is UpdateState.Failed -> Row(verticalAlignment = Alignment.CenterVertically) { Text("无法检查更新：${state.reason}", modifier = Modifier.weight(1f), color = Color(0xFF8A6A55), style = MaterialTheme.typography.bodySmall); TextButton(onClick = onCheck) { Text("重试") } }
         is UpdateState.Available -> Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F4ED))) {
             Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
@@ -342,7 +385,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
                     historyLimitText = value
                     value.toIntOrNull()?.takeIf { it in 1..50 }?.let { dictionaryConfig = dictionaryConfig.copy(historyLimit = it) }
                 }
-            }, Modifier.fillMaxWidth(), label = { Text("最近搜索记录数量") }, supportingText = { Text("默认 5 条，范围为 1–50 条") }, singleLine = true) }
+            }, Modifier.fillMaxWidth(), label = { Text("历史记录数量") }, supportingText = { Text("默认 5 条，范围为 1–50 条") }, singleLine = true) }
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 每次打开时检查 LexiNote 文件夹，并将其中每个 JSON 建为独立生词本。", style = MaterialTheme.typography.bodyMedium) }
@@ -507,8 +550,10 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     Button(onClick = onBack, modifier = Modifier.padding(top = 28.dp), shape = RoundedCornerShape(18.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B8F72))) { Text("返回首页") }
 }
 
-@Composable private fun Library(books: List<StoredWordbook>, onImport: () -> Unit, onBack: () -> Unit, onOpen: (StoredWordbook) -> Unit) {
-    Scaffold(topBar = { BackBar("Zotero 词库（${books.size}）", onBack, onImport) }) { padding ->
+@Composable private fun Library(books: List<StoredWordbook>, onImport: () -> Unit, onCreateBook: (String) -> Result<StoredWordbook>, onBack: () -> Unit, onOpen: (StoredWordbook) -> Unit) {
+    var showCreateBook by remember { mutableStateOf(false) }
+    var message by remember { mutableStateOf("") }
+    Scaffold(topBar = { TopAppBar(title = { Text("Zotero 词库（${books.size}）") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回") } }, actions = { IconButton(onImport) { Icon(Icons.Default.FileOpen, "导入") }; IconButton(onClick = { showCreateBook = true }) { Icon(Icons.Default.Add, "新建词库") } }) }) { padding ->
         LazyColumn(Modifier.padding(padding)) {
             item { Text("Zotero", modifier = Modifier.padding(20.dp, 16.dp, 20.dp, 4.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("坚果云 LexiNote 文件夹中的每个 JSON 都会成为一个独立生词本。", modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp), style = MaterialTheme.typography.bodySmall, color = Color(0xFF6A706C)) }
@@ -516,8 +561,35 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
                 ListItem(headlineContent = { Text(book.title, fontWeight = FontWeight.SemiBold) }, supportingContent = { Text("${book.entries.size} 个词条") }, modifier = Modifier.clickable { onOpen(book) })
                 HorizontalDivider()
             }
+            message.takeIf { it.isNotBlank() }?.let { item { Text(it, modifier = Modifier.padding(20.dp), color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall) } }
         }
     }
+    if (showCreateBook) CreateWordbookDialog(
+        onDismiss = { showCreateBook = false },
+        onCreate = { title -> onCreateBook(title).onSuccess { message = "已新建词库“${it.title}”"; showCreateBook = false }.onFailure { message = it.message ?: "新建词库失败" } }
+    )
+}
+
+@Composable private fun WordbookPickerDialog(books: List<StoredWordbook>, onDismiss: () -> Unit, onCreateBook: () -> Unit, onSelect: (StoredWordbook) -> Unit) = AlertDialog(
+    onDismissRequest = onDismiss,
+    title = { Text("保存到词库") },
+    text = {
+        if (books.isEmpty()) Text("暂无词库，请先新建一个词库。")
+        else LazyColumn { items(books, key = { it.id }) { book -> ListItem(headlineContent = { Text(book.title) }, supportingContent = { Text("${book.entries.size} 个词条") }, modifier = Modifier.fillMaxWidth().clickable { onSelect(book) }) } }
+    },
+    confirmButton = { TextButton(onClick = onCreateBook) { Text("新建词库") } },
+    dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+)
+
+@Composable private fun CreateWordbookDialog(onDismiss: () -> Unit, onCreate: (String) -> Unit) {
+    var title by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建词库") },
+        text = { OutlinedTextField(title, { title = it }, label = { Text("词库名称") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { onCreate(title) }, enabled = title.trim().isNotEmpty()) { Text("新建") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
+    )
 }
 
 @Composable private fun WordbookEntries(book: StoredWordbook, onBack: () -> Unit, onOpen: (WordEntry) -> Unit) {
