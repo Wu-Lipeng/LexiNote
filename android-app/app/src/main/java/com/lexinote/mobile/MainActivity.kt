@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
@@ -190,7 +191,18 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         Page.REVIEW -> ReviewPage(
             entries = scopedEntries,
             mode = reviewMode,
+            dictionaryConfig = dictionaryConfig,
+            searchHistory = searchHistory,
+            books = books,
             onBack = { page = Page.HOME },
+            onLookup = { word, onResult -> appScope.launch {
+                val lookup = runCatching { BaiduDictionaryRepository.lookup(word, dictionaryConfig) }
+                lookup.onSuccess { result -> searchHistory = dictionaryHistory.record(result.word, dictionaryConfig.historyLimit) }
+                onResult(lookup)
+            } },
+            onSaveToBook = saveDictionaryEntry,
+            onCreateBook = createWordbook,
+            onDeleteHistory = deleteHistory,
             onMarkedChanged = { entry, marked ->
                 repo.updateMarked(entry.id, marked)
                 entries = repo.load()
@@ -255,7 +267,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, searchHistory: List<String>, books: List<StoredWordbook>, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onSaveToBook: (DictionaryResult, String) -> Result<Unit>, onCreateBook: (String) -> Result<StoredWordbook>, onDeleteHistory: (String) -> Unit, modifier: Modifier = Modifier) {
+@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, searchHistory: List<String>, books: List<StoredWordbook>, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onSaveToBook: (DictionaryResult, String) -> Result<Unit>, onCreateBook: (String) -> Result<StoredWordbook>, onDeleteHistory: (String) -> Unit, modifier: Modifier = Modifier, showSettingsButton: Boolean = true) {
     var word by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf<DictionaryResult?>(null) }
     var message by remember { mutableStateOf("") }
@@ -280,7 +292,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             }
         }
         item { Button(onClick = ::query, modifier = Modifier.fillMaxWidth(), enabled = !loading && word.isNotBlank() && config.isConfigured()) { Text(if (loading) "查询中…" else "查词") } }
-        if (!config.isConfigured()) item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("请先在设置中填写百度 API Key 和 Secret Key。", color = Color(0xFF8A6A55)); OutlinedButton(onClick = onSettings) { Text("打开设置") } } }
+        if (!config.isConfigured()) item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("请先在设置中填写百度 API Key 和 Secret Key。", color = Color(0xFF8A6A55)); if (showSettingsButton) OutlinedButton(onClick = onSettings) { Text("打开设置") } } }
         message.takeIf { it.isNotBlank() }?.let { item { Text(it, color = if (loading) Color(0xFF6A706C) else Color(0xFF8A6A55)) } }
         result?.let { lookup ->
             item { HorizontalDivider() }
@@ -460,16 +472,19 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, onBack: () -> Unit, onMarkedChanged: (WordEntry, Boolean) -> Unit, onGrade: (WordEntry, Int, Boolean?) -> Unit) {
+@Composable private fun ReviewPage(entries: List<WordEntry>, mode: ReviewMode, dictionaryConfig: BaiduDictionaryConfig, searchHistory: List<String>, books: List<StoredWordbook>, onBack: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onSaveToBook: (DictionaryResult, String) -> Result<Unit>, onCreateBook: (String) -> Result<StoredWordbook>, onDeleteHistory: (String) -> Unit, onMarkedChanged: (WordEntry, Boolean) -> Unit, onGrade: (WordEntry, Int, Boolean?) -> Unit) {
     var queueIds by remember(mode) { mutableStateOf(ReviewSession.shuffledIds(entries, mode)) }
     var reviewProgress by remember(mode) { mutableStateOf(ReviewProgress()) }
+    var showLookup by remember { mutableStateOf(false) }
     val sessionTotal = queueIds.size
     val card = queueIds.getOrNull(reviewProgress.currentIndex)?.let { id -> entries.firstOrNull { it.id == id } }
     val completed = reviewProgress.reviewedIndices.size
     val progress = if (sessionTotal == 0) 1f else completed.toFloat() / sessionTotal
     val finished = reviewProgress.isComplete(sessionTotal)
     var reveal by remember(card?.id) { mutableStateOf(false) }
-    Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
+    if (showLookup) {
+        ReviewLookupPage(dictionaryConfig, searchHistory, books, onLookup, onSaveToBook, onCreateBook, onDeleteHistory, onBack = { showLookup = false })
+    } else Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp, vertical = 14.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
@@ -491,6 +506,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
                             tint = if (card?.marked == true) Color(0xFFE0A12D) else LocalContentColor.current
                         )
                     }
+                    IconButton(onClick = { showLookup = true }) { Icon(Icons.Default.Search, "查词") }
                 }
                 Spacer(Modifier.weight(1f))
                 Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
@@ -504,6 +520,12 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
                 onGrade(entry, grade, marked)
             }
         }
+    }
+}
+
+@Composable private fun ReviewLookupPage(config: BaiduDictionaryConfig, searchHistory: List<String>, books: List<StoredWordbook>, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onSaveToBook: (DictionaryResult, String) -> Result<Unit>, onCreateBook: (String) -> Result<StoredWordbook>, onDeleteHistory: (String) -> Unit, onBack: () -> Unit) {
+    Scaffold(topBar = { TopAppBar(title = { Text("查词") }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回复习") } }) }) { padding ->
+        DictionaryLookupPage(config, searchHistory, books, onSettings = {}, onLookup = onLookup, onSaveToBook = onSaveToBook, onCreateBook = onCreateBook, onDeleteHistory = onDeleteHistory, modifier = Modifier.fillMaxSize().padding(padding), showSettingsButton = false)
     }
 }
 
