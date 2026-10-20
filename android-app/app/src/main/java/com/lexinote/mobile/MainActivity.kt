@@ -489,6 +489,8 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
                 Spacer(Modifier.weight(1f))
+            }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 if (finished) {
                     Text("本轮完成", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 } else {
