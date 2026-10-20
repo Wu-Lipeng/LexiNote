@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build XPI
         shell: pwsh
@@ -29,5 +31,13 @@ jobs:
           $xpi = Get-ChildItem -LiteralPath "dist" -Filter "*.xpi" | Select-Object -First 1
           if (-not $xpi) { throw "Build did not produce an XPI file." }
           $args = @($tag, $xpi.FullName, "--title", "LexiNote $tag", "--generate-notes")
-          if ($tag -match "-") { $args += "--prerelease" }
+          if ($tag -match "-") {
+            # Each beta summarizes changes since the immediately preceding plugin tag.
+            $previousTag = (git describe --tags --abbrev=0 "${tag}^" --match "v*" 2>$null)
+            $args += "--prerelease"
+          } else {
+            # A stable release summarizes the entire cycle since the prior stable plugin tag.
+            $previousTag = @(git tag --merged "${tag}^" --list "v*" --sort=-version:refname | Where-Object { $_ -match '^v\d+\.\d+\.\d+$' } | Select-Object -First 1)[0]
+          }
+          if ($previousTag) { $args += @("--notes-start-tag", $previousTag) }
           gh release create @args
