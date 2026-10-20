@@ -53,6 +53,11 @@ class DictionarySearchHistoryRepository(context: Context) {
         prefs.edit().putString("words", retained.joinToString("\u001F")).apply()
         return retained
     }
+    fun delete(word: String, limit: Int): List<String> {
+        val retained = load(50).filterNot { it.equals(word, ignoreCase = true) }.take(limit.coerceIn(1, 50))
+        prefs.edit().putString("words", retained.joinToString("\u001F")).apply()
+        return retained
+    }
 }
 
 object BaiduDictionaryRepository {

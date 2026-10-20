@@ -27,6 +27,18 @@ class WordbookRepository(context: Context) {
         saveBooks((loadBooks() + book).sortedBy { it.title.lowercase() })
         return book
     }
+    fun renameBook(bookId: String, title: String) {
+        val name = title.trim()
+        require(name.isNotBlank()) { "请输入词库名称" }
+        val books = loadBooks()
+        require(books.none { it.id != bookId && it.title.equals(name, ignoreCase = true) }) { "已存在同名词库" }
+        require(books.any { it.id == bookId }) { "词库不存在" }
+        saveBooks(books.map { if (it.id == bookId) it.copy(title = name) else it }.sortedBy { it.title.lowercase() })
+    }
+    fun deleteBook(bookId: String) { saveBooks(loadBooks().filterNot { it.id == bookId }) }
+    fun deleteEntry(bookId: String, entryId: String) {
+        saveBooks(loadBooks().map { book -> if (book.id == bookId) book.copy(entries = book.entries.filterNot { it.id == entryId }) else book })
+    }
     fun saveDictionaryEntry(bookId: String, result: DictionaryResult) {
         val books = loadBooks().toMutableList()
         val index = books.indexOfFirst { it.id == bookId }
@@ -62,7 +74,7 @@ class WordbookRepository(context: Context) {
                 marked = local?.marked ?: incoming.marked
             )
         }
-        val book = StoredWordbook(bookId, title, existing.values.sortedBy { it.word.lowercase() })
+        val book = StoredWordbook(bookId, books.getOrNull(index)?.title ?: title, existing.values.sortedBy { it.word.lowercase() })
         if (index >= 0) books[index] = book else books.add(book)
         saveBooks(books.sortedBy { it.title.lowercase() })
         return file.entries.size
