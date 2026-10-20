@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -54,6 +55,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     val context = androidx.compose.ui.platform.LocalContext.current
     val repo = remember { WordbookRepository(context) }
     val nutstoreSettings = remember { NutstoreSettingsRepository(context) }
+    val dictionarySettings = remember { BaiduDictionarySettingsRepository(context) }
     val studyScopeRepository = remember { StudyScopeRepository(context) }
     var entries by remember { mutableStateOf(repo.load()) }
     var books by remember { mutableStateOf(repo.loadBooks()) }
@@ -65,6 +67,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     var updateState by remember { mutableStateOf<UpdateState>(UpdateState.Checking) }
     var betaUpdateState by remember { mutableStateOf<UpdateState?>(null) }
     var syncMessage by remember { mutableStateOf("") }
+    var dictionaryConfig by remember { mutableStateOf(dictionarySettings.load()) }
     val appScope = rememberCoroutineScope()
     val syncFromNutstore: (NutstoreConfig) -> Unit = { config ->
         appScope.launch {
@@ -142,6 +145,8 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             onLibrary = { page = Page.LIBRARY },
             onManageStudyScope = { page = Page.STUDY_SCOPE },
             onSettings = { page = Page.SETTINGS },
+            dictionaryConfig = dictionaryConfig,
+            onLookup = { word, onResult -> appScope.launch { onResult(runCatching { BaiduDictionaryRepository.lookup(word, dictionaryConfig) }) } },
             onUpdate = installUpdate
         )
         Page.REVIEW -> ReviewPage(
@@ -170,21 +175,30 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         )
         Page.SETTINGS -> NutstoreSettingsPage(
             repository = nutstoreSettings,
+            dictionaryRepository = dictionarySettings,
             syncMessage = syncMessage,
             betaUpdateState = betaUpdateState,
             onBack = { page = Page.HOME },
             onSync = syncFromNutstore,
+            onDictionaryConfigSaved = { dictionaryConfig = it },
             onCheckBeta = checkBetaUpdate,
             onUpdate = installUpdate
         )
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, dictionaryConfig: BaiduDictionaryConfig, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
     val marked = entries.count { it.marked }
+    var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     Scaffold(topBar = { TopAppBar(title = { Text("LexiNote 背词") }, actions = { IconButton(onSettings) { Icon(Icons.Default.Settings, "设置") } }) }) { padding ->
-        Column(Modifier.padding(padding).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Column(Modifier.padding(padding)) {
+            TabRow(selectedTabIndex = selectedTab) { listOf("背词", "查词").forEachIndexed { index, title -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) }) } }
+            if (selectedTab == 1) {
+                DictionaryLookupPage(dictionaryConfig, onSettings, onLookup)
+                return@Scaffold
+            }
+            Column(Modifier.padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
             Text("把 Zotero 生词本带在身边", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
             Text("从 LexiNote 导出的 JSON 文件导入，所有复习记录只保存在本机。")
             Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
@@ -198,6 +212,33 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             OutlinedButton(onClick = onLibrary, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("Zotero 词库") }
             OutlinedButton(onClick = onImport, Modifier.fillMaxWidth()) { Icon(Icons.Default.FileOpen, null); Spacer(Modifier.width(8.dp)); Text("导入 LexiNote JSON") }
             OutlinedButton(onClick = onManageStudyScope, Modifier.fillMaxWidth()) { Icon(Icons.Default.LibraryBooks, null); Spacer(Modifier.width(8.dp)); Text("管理背词词库") }
+            }
+        }
+    }
+}
+
+@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit) {
+    var word by rememberSaveable { mutableStateOf("") }
+    var result by remember { mutableStateOf<DictionaryResult?>(null) }
+    var message by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    fun query() {
+        loading = true; result = null; message = "正在查词…"
+        onLookup(word) { response -> loading = false; response.onSuccess { result = it; message = "" }.onFailure { message = it.message ?: "查词失败" } }
+    }
+    LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        item { Text("百度词典", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
+        item { Text("输入英文单词，获取音标、词性释义和例句。", color = Color(0xFF6A706C)) }
+        item { OutlinedTextField(word, { newWord -> word = newWord }, Modifier.fillMaxWidth(), label = { Text("英文单词") }, singleLine = true, enabled = !loading) }
+        item { Button(onClick = ::query, modifier = Modifier.fillMaxWidth(), enabled = !loading && word.isNotBlank() && config.isConfigured()) { Text(if (loading) "查询中…" else "查词") } }
+        if (!config.isConfigured()) item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("请先在设置中填写百度 API Key 和 Secret Key。", color = Color(0xFF8A6A55)); OutlinedButton(onClick = onSettings) { Text("打开设置") } } }
+        message.takeIf { it.isNotBlank() }?.let { item { Text(it, color = if (loading) Color(0xFF6A706C) else Color(0xFF8A6A55)) } }
+        result?.let { lookup ->
+            item { HorizontalDivider() }
+            item { Text(lookup.word, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold) }
+            lookup.phonetic.takeIf { it.isNotBlank() }?.let { item { Text("/$it/", style = MaterialTheme.typography.titleMedium, color = Color(0xFF6A706C)) } }
+            item { Text(lookup.meanings.joinToString("\n"), style = MaterialTheme.typography.titleMedium) }
+            if (lookup.examples.isNotEmpty()) item { Text("例句\n${lookup.examples.joinToString("\n") { "• $it" }}") }
         }
     }
 }
@@ -237,11 +278,18 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, dictionaryRepository: BaiduDictionarySettingsRepository, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onDictionaryConfigSaved: (BaiduDictionaryConfig) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     var config by remember { mutableStateOf(repository.load()) }
+    var dictionaryConfig by remember { mutableStateOf(dictionaryRepository.load()) }
     var saveStatus by remember { mutableStateOf("") }
     Scaffold(topBar = { BackBar("设置", onBack) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item { Text("百度文本翻译·词典版", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
+            item { Text("仅在查词时将输入的单词发送给百度。请在百度智能云创建文本翻译应用后填写 API Key 和 Secret Key。", style = MaterialTheme.typography.bodyMedium) }
+            item { OutlinedTextField(dictionaryConfig.apiKey, { dictionaryConfig = dictionaryConfig.copy(apiKey = it) }, Modifier.fillMaxWidth(), label = { Text("百度 API Key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) }
+            item { OutlinedTextField(dictionaryConfig.secretKey, { dictionaryConfig = dictionaryConfig.copy(secretKey = it) }, Modifier.fillMaxWidth(), label = { Text("百度 Secret Key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) }
+            item { Button(onClick = { dictionaryRepository.save(dictionaryConfig); onDictionaryConfigSaved(dictionaryConfig); saveStatus = "百度词典设置已保存。" }, modifier = Modifier.fillMaxWidth()) { Text("保存百度词典设置") } }
+            item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 每次打开时检查 LexiNote 文件夹，并将其中每个 JSON 建为独立生词本。", style = MaterialTheme.typography.bodyMedium) }
             item { OutlinedTextField(config.serverUrl, { config = config.copy(serverUrl = it) }, Modifier.fillMaxWidth(), label = { Text("WebDAV 地址") }, singleLine = true) }

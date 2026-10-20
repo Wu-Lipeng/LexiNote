@@ -1,4 +1,4 @@
-# LexiNote Android（正式版 0.1.11）
+# LexiNote Android（测试版 0.1.12-beta.1）
 
 离线安卓背词客户端，导入由 LexiNote Zotero 插件导出的 `lexinote-wordbook` schema v1 JSON 文件。
 
@@ -8,6 +8,7 @@
 - 词库搜索、词义、音标、例句、原文句与文献页码来源查看。
 - 卡片式学习界面：点击翻卡后选择“再记一次”或“认识了”；数据保存在应用私有存储，不上传网络。
 - 启动时检查 GitHub Android 更新清单；用户确认下载后交由系统安装器更新。
+- 首页提供“背词 / 查词”标签；查词使用百度文本翻译·词典版，API Key 与 Secret Key 在设置中配置。
 
 ## 打开与测试
 
