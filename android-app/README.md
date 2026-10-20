@@ -1,4 +1,4 @@
-# LexiNote Android（测试版 0.1.12-beta.2）
+# LexiNote Android（测试版 0.1.12-beta.3）
 
 离线安卓背词客户端，导入由 LexiNote Zotero 插件导出的 `lexinote-wordbook` schema v1 JSON 文件。
 

@@ -197,7 +197,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         Column(Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = selectedTab) { listOf("背词", "查词").forEachIndexed { index, title -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) }) } }
             if (selectedTab == 1) {
-                DictionaryLookupPage(dictionaryConfig, onSettings, onLookup)
+                DictionaryLookupPage(dictionaryConfig, onSettings, onLookup, Modifier.weight(1f))
                 return@Scaffold
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -219,7 +219,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit) {
+@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, modifier: Modifier = Modifier) {
     var word by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf<DictionaryResult?>(null) }
     var message by remember { mutableStateOf("") }
@@ -228,7 +228,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         loading = true; result = null; message = "正在查词…"
         onLookup(word) { response -> loading = false; response.onSuccess { result = it; message = "" }.onFailure { message = it.message ?: "查词失败" } }
     }
-    LazyColumn(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+    LazyColumn(modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("百度词典", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
         item { Text("输入英文单词，获取音标、词性释义和例句。", color = Color(0xFF6A706C)) }
         item { OutlinedTextField(word, { newWord -> word = newWord }, Modifier.fillMaxWidth(), label = { Text("英文单词") }, singleLine = true, enabled = !loading) }
