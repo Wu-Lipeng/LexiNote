@@ -16,7 +16,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.concurrent.TimeUnit
 
-data class BaiduDictionaryConfig(val apiKey: String = "", val secretKey: String = "") {
+data class BaiduDictionaryConfig(val apiKey: String = "", val secretKey: String = "", val historyLimit: Int = 5) {
     fun isConfigured() = apiKey.isNotBlank() && secretKey.isNotBlank()
 }
 
@@ -27,11 +27,31 @@ class BaiduDictionarySettingsRepository(context: Context) {
 
     fun load() = BaiduDictionaryConfig(
         apiKey = prefs.getString("apiKey", "").orEmpty(),
-        secretKey = prefs.getString("secretKey", "").orEmpty()
+        secretKey = prefs.getString("secretKey", "").orEmpty(),
+        historyLimit = prefs.getInt("historyLimit", 5).coerceIn(1, 50)
     )
 
     fun save(config: BaiduDictionaryConfig) {
-        prefs.edit().putString("apiKey", config.apiKey.trim()).putString("secretKey", config.secretKey).apply()
+        prefs.edit().putString("apiKey", config.apiKey.trim()).putString("secretKey", config.secretKey).putInt("historyLimit", config.historyLimit.coerceIn(1, 50)).apply()
+    }
+}
+
+class DictionarySearchHistoryRepository(context: Context) {
+    private val prefs = context.getSharedPreferences("lexinote_dictionary_history", Context.MODE_PRIVATE)
+
+    fun load(limit: Int): List<String> = prefs.getString("words", "").orEmpty().split('\u001F').filter(String::isNotBlank).take(limit.coerceIn(1, 50))
+
+    fun record(word: String, limit: Int): List<String> {
+        val words = listOf(word.trim()) + load(50).filterNot { it.equals(word.trim(), ignoreCase = true) }
+        val retained = words.take(limit.coerceIn(1, 50))
+        prefs.edit().putString("words", retained.joinToString("\u001F")).apply()
+        return retained
+    }
+
+    fun trim(limit: Int): List<String> {
+        val retained = load(50).take(limit.coerceIn(1, 50))
+        prefs.edit().putString("words", retained.joinToString("\u001F")).apply()
+        return retained
     }
 }
 

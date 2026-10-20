@@ -10,6 +10,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,6 +59,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     val repo = remember { WordbookRepository(context) }
     val nutstoreSettings = remember { NutstoreSettingsRepository(context) }
     val dictionarySettings = remember { BaiduDictionarySettingsRepository(context) }
+    val dictionaryHistory = remember { DictionarySearchHistoryRepository(context) }
     val studyScopeRepository = remember { StudyScopeRepository(context) }
     var entries by remember { mutableStateOf(repo.load()) }
     var books by remember { mutableStateOf(repo.loadBooks()) }
@@ -70,6 +72,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     var betaUpdateState by remember { mutableStateOf<UpdateState?>(null) }
     var syncMessage by remember { mutableStateOf("") }
     var dictionaryConfig by remember { mutableStateOf(dictionarySettings.load()) }
+    var searchHistory by remember { mutableStateOf(dictionaryHistory.load(dictionaryConfig.historyLimit)) }
     val appScope = rememberCoroutineScope()
     val syncFromNutstore: (NutstoreConfig) -> Unit = { config ->
         appScope.launch {
@@ -148,7 +151,12 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             onManageStudyScope = { page = Page.STUDY_SCOPE },
             onSettings = { page = Page.SETTINGS },
             dictionaryConfig = dictionaryConfig,
-            onLookup = { word, onResult -> appScope.launch { onResult(runCatching { BaiduDictionaryRepository.lookup(word, dictionaryConfig) }) } },
+            searchHistory = searchHistory,
+            onLookup = { word, onResult -> appScope.launch {
+                val lookup = runCatching { BaiduDictionaryRepository.lookup(word, dictionaryConfig) }
+                lookup.onSuccess { result -> searchHistory = dictionaryHistory.record(result.word, dictionaryConfig.historyLimit) }
+                onResult(lookup)
+            } },
             onUpdate = installUpdate
         )
         Page.REVIEW -> ReviewPage(
@@ -182,14 +190,14 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             betaUpdateState = betaUpdateState,
             onBack = { page = Page.HOME },
             onSync = syncFromNutstore,
-            onDictionaryConfigSaved = { dictionaryConfig = it },
+            onDictionaryConfigSaved = { saved -> dictionaryConfig = saved; searchHistory = dictionaryHistory.trim(saved.historyLimit) },
             onCheckBeta = checkBetaUpdate,
             onUpdate = installUpdate
         )
     }
 }
 
-@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, dictionaryConfig: BaiduDictionaryConfig, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onUpdate: (UpdateInfo) -> Unit) {
+@Composable private fun Home(entries: List<WordEntry>, updateState: UpdateState, syncMessage: String, onImport: () -> Unit, onReview: () -> Unit, onReviewAll: () -> Unit, onReviewMarked: () -> Unit, onLibrary: () -> Unit, onManageStudyScope: () -> Unit, onSettings: () -> Unit, dictionaryConfig: BaiduDictionaryConfig, searchHistory: List<String>, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     val due = entries.count { it.review.nextReviewAt == null || it.review.nextReviewAt <= System.currentTimeMillis() }
     val marked = entries.count { it.marked }
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
@@ -197,7 +205,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         Column(Modifier.fillMaxSize().padding(padding)) {
             TabRow(selectedTabIndex = selectedTab) { listOf("背词", "查词").forEachIndexed { index, title -> Tab(selected = selectedTab == index, onClick = { selectedTab = index }, text = { Text(title) }) } }
             if (selectedTab == 1) {
-                DictionaryLookupPage(dictionaryConfig, onSettings, onLookup, Modifier.weight(1f))
+                DictionaryLookupPage(dictionaryConfig, searchHistory, onSettings, onLookup, Modifier.weight(1f))
                 return@Scaffold
             }
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -219,19 +227,27 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
     }
 }
 
-@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, modifier: Modifier = Modifier) {
+@Composable private fun DictionaryLookupPage(config: BaiduDictionaryConfig, searchHistory: List<String>, onSettings: () -> Unit, onLookup: (String, (Result<DictionaryResult>) -> Unit) -> Unit, modifier: Modifier = Modifier) {
     var word by rememberSaveable { mutableStateOf("") }
     var result by remember { mutableStateOf<DictionaryResult?>(null) }
     var message by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
-    fun query() {
+    fun query(queryWord: String = word) {
+        word = queryWord
         loading = true; result = null; message = "正在查词…"
-        onLookup(word) { response -> loading = false; response.onSuccess { result = it; message = "" }.onFailure { message = it.message ?: "查词失败" } }
+        onLookup(queryWord) { response -> loading = false; response.onSuccess { result = it; message = "" }.onFailure { message = it.message ?: "查词失败" } }
     }
     LazyColumn(modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item { Text("百度词典", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold) }
         item { Text("输入英文单词，获取音标、词性释义和例句。", color = Color(0xFF6A706C)) }
         item { OutlinedTextField(word, { newWord -> word = newWord }, Modifier.fillMaxWidth(), label = { Text("英文单词") }, singleLine = true, enabled = !loading) }
+        if (searchHistory.isNotEmpty()) {
+            item { Text("最近搜索", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold) }
+            items(searchHistory, key = { it.lowercase() }) { previousWord ->
+                ListItem(headlineContent = { Text(previousWord) }, modifier = Modifier.fillMaxWidth().clickable(enabled = !loading && config.isConfigured()) { query(previousWord) })
+                HorizontalDivider()
+            }
+        }
         item { Button(onClick = ::query, modifier = Modifier.fillMaxWidth(), enabled = !loading && word.isNotBlank() && config.isConfigured()) { Text(if (loading) "查询中…" else "查词") } }
         if (!config.isConfigured()) item { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) { Text("请先在设置中填写百度 API Key 和 Secret Key。", color = Color(0xFF8A6A55)); OutlinedButton(onClick = onSettings) { Text("打开设置") } } }
         message.takeIf { it.isNotBlank() }?.let { item { Text(it, color = if (loading) Color(0xFF6A706C) else Color(0xFF8A6A55)) } }
@@ -283,14 +299,50 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
 @Composable private fun NutstoreSettingsPage(repository: NutstoreSettingsRepository, dictionaryRepository: BaiduDictionarySettingsRepository, syncMessage: String, betaUpdateState: UpdateState?, onBack: () -> Unit, onSync: (NutstoreConfig) -> Unit, onDictionaryConfigSaved: (BaiduDictionaryConfig) -> Unit, onCheckBeta: () -> Unit, onUpdate: (UpdateInfo) -> Unit) {
     var config by remember { mutableStateOf(repository.load()) }
     var dictionaryConfig by remember { mutableStateOf(dictionaryRepository.load()) }
+    var historyLimitText by remember { mutableStateOf(dictionaryConfig.historyLimit.toString()) }
+    var savedConfig by remember { mutableStateOf(config) }
+    var savedDictionaryConfig by remember { mutableStateOf(dictionaryConfig) }
     var saveStatus by remember { mutableStateOf("") }
-    Scaffold(topBar = { BackBar("设置", onBack) }) { padding ->
+    var showExitDialog by remember { mutableStateOf(false) }
+    val dirty = config != savedConfig || dictionaryConfig != savedDictionaryConfig
+    fun saveAll(onSaved: () -> Unit = {}) {
+        runCatching {
+            repository.save(config)
+            dictionaryRepository.save(dictionaryConfig)
+        }.onSuccess {
+            savedConfig = config
+            savedDictionaryConfig = dictionaryConfig
+            onDictionaryConfigSaved(dictionaryConfig)
+            saveStatus = "设置已保存。"
+            onSaved()
+        }.onFailure { saveStatus = it.message ?: "设置保存失败" }
+    }
+    fun requestExit() { if (dirty) showExitDialog = true else onBack() }
+    BackHandler { requestExit() }
+    if (showExitDialog) AlertDialog(
+        onDismissRequest = { showExitDialog = false },
+        title = { Text("未保存的设置") },
+        text = { Text("设置尚未保存。是否保存后退出？") },
+        confirmButton = { TextButton(onClick = { showExitDialog = false; saveAll(onBack) }) { Text("保存") } },
+        dismissButton = {
+            Row {
+                TextButton(onClick = { showExitDialog = false; onBack() }) { Text("不保存") }
+                TextButton(onClick = { showExitDialog = false }) { Text("继续编辑") }
+            }
+        }
+    )
+    Scaffold(topBar = { BackBar("设置", ::requestExit) }) { padding ->
         LazyColumn(Modifier.padding(padding).padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item { Text("百度文本翻译·词典版", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("仅在查词时将输入的单词发送给百度。请在百度智能云创建文本翻译应用后填写 API Key 和 Secret Key。", style = MaterialTheme.typography.bodyMedium) }
             item { OutlinedTextField(dictionaryConfig.apiKey, { dictionaryConfig = dictionaryConfig.copy(apiKey = it) }, Modifier.fillMaxWidth(), label = { Text("百度 API Key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) }
             item { OutlinedTextField(dictionaryConfig.secretKey, { dictionaryConfig = dictionaryConfig.copy(secretKey = it) }, Modifier.fillMaxWidth(), label = { Text("百度 Secret Key") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) }
-            item { Button(onClick = { dictionaryRepository.save(dictionaryConfig); onDictionaryConfigSaved(dictionaryConfig); saveStatus = "百度词典设置已保存。" }, modifier = Modifier.fillMaxWidth()) { Text("保存百度词典设置") } }
+            item { OutlinedTextField(historyLimitText, { value ->
+                if (value.all(Char::isDigit) && value.length <= 2) {
+                    historyLimitText = value
+                    value.toIntOrNull()?.takeIf { it in 1..50 }?.let { dictionaryConfig = dictionaryConfig.copy(historyLimit = it) }
+                }
+            }, Modifier.fillMaxWidth(), label = { Text("最近搜索记录数量") }, supportingText = { Text("默认 5 条，范围为 1–50 条") }, singleLine = true) }
             item { HorizontalDivider(Modifier.padding(vertical = 8.dp)) }
             item { Text("通过 WebDAV 同步词库", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold) }
             item { Text("请填写坚果云账号邮箱和在“第三方应用管理”中生成的应用密码，不要填写登录密码。App 每次打开时检查 LexiNote 文件夹，并将其中每个 JSON 建为独立生词本。", style = MaterialTheme.typography.bodyMedium) }
@@ -298,15 +350,8 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
             item { OutlinedTextField(config.username, { config = config.copy(username = it) }, Modifier.fillMaxWidth(), label = { Text("坚果云账号邮箱") }, singleLine = true) }
             item { OutlinedTextField(config.password, { config = config.copy(password = it) }, Modifier.fillMaxWidth(), label = { Text("第三方应用密码") }, singleLine = true, visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation()) }
             item {
-                Button(onClick = {
-                    runCatching { repository.save(config) }
-                        .onSuccess { saveStatus = "设置已保存。" }
-                        .onFailure { saveStatus = it.message ?: "设置保存失败" }
-                }, modifier = Modifier.fillMaxWidth()) { Text("保存设置") }
-            }
-            item {
                 OutlinedButton(onClick = {
-                    runCatching { repository.save(config) }
+                    runCatching { config.validate() }
                         .onSuccess { onSync(config) }
                         .onFailure { saveStatus = it.message ?: "请先填写完整、有效的设置" }
                 }, modifier = Modifier.fillMaxWidth(), enabled = config.isConfigured()) { Text("立即从坚果云同步") }
@@ -320,6 +365,7 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
                 val channel = if (BuildConfig.VERSION_NAME.contains("-beta")) "测试版" else "正式版"
                 Text("当前版本：${BuildConfig.VERSION_NAME}（$channel）", color = Color(0xFF6A706C), style = MaterialTheme.typography.bodySmall)
             }
+            item { Button(onClick = { saveAll() }, modifier = Modifier.fillMaxWidth()) { Text("保存设置") } }
         }
     }
 }
