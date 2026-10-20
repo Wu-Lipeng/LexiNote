@@ -486,21 +486,22 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
         ReviewLookupPage(dictionaryConfig, searchHistory, books, onLookup, onSaveToBook, onCreateBook, onDeleteHistory, onBack = { showLookup = false })
     } else Scaffold(containerColor = Color(0xFFF8F8F3)) { padding ->
         Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp, vertical = 14.dp)) {
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp)) { Text("结束学习") }
-                Spacer(Modifier.weight(1f))
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                TextButton(onClick = onBack, contentPadding = PaddingValues(0.dp), modifier = Modifier.align(Alignment.CenterStart)) { Text("结束学习") }
+                Text(if (finished) "本轮完成" else mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                if (finished) {
-                    Text("本轮完成", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                } else {
-                    IconButton(onClick = { reviewProgress = reviewProgress.goBack() }, enabled = reviewProgress.canGoBack()) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一个单词")
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                if (!finished) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(onClick = { reviewProgress = reviewProgress.goBack() }, enabled = reviewProgress.canGoBack()) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "上一个单词")
+                        }
+                        Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
+                        IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
+                        }
                     }
-                    Text(mode.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    IconButton(onClick = { reviewProgress = reviewProgress.goForward(sessionTotal) }, enabled = reviewProgress.canGoForward(sessionTotal)) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "下一个单词")
-                    }
+                    Row(modifier = Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = { card?.let { onMarkedChanged(it, !it.marked) } }, enabled = card != null) {
                         Icon(
                             imageVector = if (card?.marked == true) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
@@ -509,9 +510,8 @@ private enum class Page { HOME, REVIEW, LIBRARY, WORDBOOK, DETAIL, STUDY_SCOPE, 
                         )
                     }
                     IconButton(onClick = { showLookup = true }) { Icon(Icons.Default.Search, "查词") }
+                    }
                 }
-                Spacer(Modifier.weight(1f))
-                Text("$completed / $sessionTotal", color = Color(0xFF6B6F68), style = MaterialTheme.typography.labelLarge)
             }
             Spacer(Modifier.height(10.dp))
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(7.dp), color = Color(0xFF3B8F72), trackColor = Color(0xFFE0E7DE))
