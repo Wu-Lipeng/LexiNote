@@ -521,11 +521,12 @@ var LexiNoteRuntime = class {
     // dictionaries (MutationObserver/addEventListener options) cross scopes correctly.
     if (typeof Components !== "undefined") doc = Components.utils.unwaiveXrays(doc);
     this.byReader.get(reader)?.dispose();
-    if (!this.alive || !this.config.enabled) return;
+    if (!this.alive) return;
     const word = LexiNoteCore.wordFrom(params?.annotation?.text);
     if (!word) return;
     const attachmentID = reader.itemID;
     this.revealSavedWord(attachmentID, word).catch(() => {});
+    if (!this.config.enabled) return;
     // Capture the originating attachment/page before any network operation.
     const pageLabel = String(params.annotation.pageLabel || "");
     const pageIndex = params.annotation.position?.pageIndex;
@@ -1445,10 +1446,10 @@ var LexiNoteRuntime = class {
   async revealSavedWord(attachmentID, word) {
     if (!this.config.autoLocateSavedWord) return false;
     const saved = await this.findSavedWord(attachmentID, word);
-    return saved ? this.openNotebookAtEnd(saved.noteID, saved.normalizedWord) : false;
+    return saved ? this.openNotebookAtEnd(saved.noteID, saved.normalizedWord, true) : false;
   }
-  async openNotebookAtEnd(noteID, normalizedWord = "") {
-    if (!this.config.openNoteAfterSave) return false;
+  async openNotebookAtEnd(noteID, normalizedWord = "", forceOpen = false) {
+    if (!forceOpen && !this.config.openNoteAfterSave) return false;
     try {
       const note = await Zotero.Items.getAsync(noteID);
       const contextPane = Zotero.getMainWindow?.()?.ZoteroContextPane;

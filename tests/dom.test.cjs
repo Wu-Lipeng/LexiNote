@@ -66,6 +66,11 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const openedBeforeLocateDisable=openedNotes.length;app.config.autoLocateSavedWord=false;
       check(await app.revealSavedWord(a.id,'alpha')===false&&openedNotes.length===openedBeforeLocateDisable,'Disabled saved-word location does not open a note');
       app.config.autoLocateSavedWord=true;
+      app.config.enabled=false;app.config.openNoteAfterSave=false;const openedBeforeDisabledQuery=openedNotes.length;
+      app.selection({reader:{itemID:a.id},doc:document,params:{annotation:{text:'alpha'}},append:node=>document.body.append(node)});
+      await new Promise(r=>setTimeout(r,10));
+      check(openedNotes.length===openedBeforeDisabledQuery+1&&!document.querySelector('.lexinote-popup'),'Saved-word location remains available when query and save-location are disabled');
+      app.config.enabled=true;app.config.openNoteAfterSave=true;
       app.lookup=async word=>({meaning:'释义 '+word,phonetic:'/test/',example:'Example.'});
       const reader={itemID:a.id};let popup;
       const event=word=>({reader,doc:document,params:{annotation:{text:word,pageLabel:'4',position:{pageIndex:3}}},append:node=>{popup=node;document.body.append(node);}});
@@ -87,7 +92,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       app.stop();
       return results;
     });
-    assert.equal(results.length,23);
+    assert.equal(results.length,24);
     const markup=fs.readFileSync(path.resolve(__dirname,'../addon/preferences.xhtml'),'utf8');
     await page.evaluate(markup=>{
       const parsed=new DOMParser().parseFromString(markup,'application/xml');
@@ -96,18 +101,17 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     },markup);
     await page.addScriptTag({path:path.resolve(__dirname,'../addon/preferences.js')});
     await page.evaluate(()=>LexiNotePreferences.init());
-    assert.deepEqual(await page.evaluate(()=>[...document.querySelectorAll('#lexinote-feature-settings h3')].map(heading=>{
-      const controls=[];let node=heading.nextElementSibling;
-      while(node&&node.localName!=='h3'){controls.push(...node.querySelectorAll('input, select, button'));node=node.nextElementSibling;}
-      return {title:heading.textContent,controls:controls.map(control=>control.id)};
-    })),[
-      {title:'划词查询',controls:['lexinote-enabled','lexinote-delay','lexinote-timeout']},
-      {title:'划词标记',controls:['lexinote-autoHighlight','lexinote-highlightColor','lexinote-highlightType']},
-      {title:'定位',controls:['lexinote-autoLocateSavedWord','lexinote-openNoteAfterSave','lexinote-noteLocateMode','lexinote-showNoteLocateStatus']},
-      {title:'操作',controls:['lexinote-restoreFeatures','lexinote-syncHighlights','lexinote-sortWordbook','lexinote-diagnoseSourceSentences']}
-    ]);
+    assert.deepEqual(await page.evaluate(()=>({
+      headings:[...document.querySelectorAll('#lexinote-feature-settings h3')].map(heading=>heading.textContent),
+      controls:[...document.querySelectorAll('#lexinote-feature-settings input, #lexinote-feature-settings select, #lexinote-feature-settings button')].map(control=>control.id)
+    })),{
+      headings:['划词查询','划词标记','定位','操作'],
+      controls:['lexinote-enabled','lexinote-delay','lexinote-timeout','lexinote-autoHighlight','lexinote-highlightColor','lexinote-highlightType','lexinote-autoLocateSavedWord','lexinote-openNoteAfterSave','lexinote-noteLocateMode','lexinote-showNoteLocateStatus','lexinote-restoreFeatures','lexinote-syncHighlights','lexinote-sortWordbook','lexinote-diagnoseSourceSentences']
+    });
     assert.equal(await page.evaluate(()=>{const $=id=>document.getElementById('lexinote-'+id);$('autoHighlight').checked=false;$('autoHighlight').dispatchEvent(new Event('change'));return $('autoHighlightOptions').hidden;}),true);
     assert.equal(await page.evaluate(()=>{const $=id=>document.getElementById('lexinote-'+id);$('autoHighlight').checked=true;$('autoHighlight').dispatchEvent(new Event('change'));return $('autoHighlightOptions').hidden;}),false);
+    assert.deepEqual(await page.evaluate(()=>{const $=id=>document.getElementById('lexinote-'+id);$('enabled').checked=false;$('enabled').dispatchEvent(new Event('change'));return {query:$('queryOptions').hidden,highlighting:$('highlightingModule').hidden,openNote:$('openNoteAfterSaveOption').hidden,locate:$('autoLocateSavedWord').closest('p').hidden};}),{query:true,highlighting:true,openNote:true,locate:false});
+    assert.deepEqual(await page.evaluate(()=>{const $=id=>document.getElementById('lexinote-'+id);$('enabled').checked=true;$('enabled').dispatchEvent(new Event('change'));return {query:$('queryOptions').hidden,highlighting:$('highlightingModule').hidden,openNote:$('openNoteAfterSaveOption').hidden};}),{query:false,highlighting:false,openNote:false});
     assert.deepEqual(await page.evaluate(()=>{
       const $=id=>document.getElementById('lexinote-'+id);
       return {debounce:$('nutstoreAutoSyncDebouncePreset').value,minInterval:$('nutstoreAutoSyncMinIntervalPreset').value,debounceCustom:$('nutstoreAutoSyncDebounce').style.display,minIntervalCustom:$('nutstoreAutoSyncMinInterval').style.display};

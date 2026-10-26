@@ -24,8 +24,16 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
     const updateAutoHighlightOptions = () => { $("autoHighlightOptions").hidden = !$("autoHighlight").checked; };
+    const updateQueryOptions = () => {
+      const queryEnabled = $("enabled").checked;
+      $("queryOptions").hidden = !queryEnabled;
+      $("highlightingModule").hidden = !queryEnabled;
+      $("openNoteAfterSaveOption").hidden = !queryEnabled;
+    };
     updateAutoHighlightOptions();
+    updateQueryOptions();
     $("autoHighlight").addEventListener("change", updateAutoHighlightOptions);
+    $("enabled").addEventListener("change", updateQueryOptions);
     $("openNoteAfterSave").checked = Boolean(app.config.openNoteAfterSave);
     $("autoLocateSavedWord").checked = Boolean(app.config.autoLocateSavedWord);
     $("noteLocateMode").value = app.config.noteLocateMode || "select";
@@ -95,6 +103,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
         enabled: true, autoHighlight: true, openNoteAfterSave: true, autoLocateSavedWord: true, noteLocateMode: "select", showNoteLocateStatus: false, highlightColor: "#c0c0c0", highlightType: "highlight", delay: 350, timeout: 12000
       };
       $("enabled").checked = defaults.enabled;
+      updateQueryOptions();
       $("autoHighlight").checked = defaults.autoHighlight;
       updateAutoHighlightOptions();
       $("openNoteAfterSave").checked = defaults.openNoteAfterSave;
