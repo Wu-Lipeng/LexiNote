@@ -134,6 +134,15 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     });
     assert.equal(firstSaveStatus,'设置已保存，立即生效。');
     assert.equal(await page.evaluate(()=>Zotero.LexiNote.config.delay),300);
+    const presetCloseWarning=await page.evaluate(()=>{
+      const $=id=>document.getElementById('lexinote-'+id);
+      $('nutstoreAutoSyncDebouncePreset').value='custom';$('nutstoreAutoSyncDebouncePreset').dispatchEvent(new Event('change'));
+      $('nutstoreAutoSyncDebouncePreset').value='60';$('nutstoreAutoSyncDebouncePreset').dispatchEvent(new Event('change'));
+      let promptArgs;let closeCalls=0;window.close=()=>closeCalls++;Services.prompt.confirmEx=(...args)=>{promptArgs=args;return 1;};
+      const event=new Event('close',{cancelable:true});window.dispatchEvent(event);
+      return {prevented:event.defaultPrevented,title:promptArgs[1],message:promptArgs[2],closeCalls};
+    });
+    assert.deepEqual(presetCloseWarning,{prevented:true,title:'未保存的设置',message:'设置尚未保存。请选择保存或不保存后关闭设置窗口。',closeCalls:1});
     const syncIntervals=await page.evaluate(async()=>{
       const $=id=>document.getElementById('lexinote-'+id);
       $('nutstoreAutoSyncDebouncePreset').value='custom';$('nutstoreAutoSyncDebouncePreset').dispatchEvent(new Event('change'));
