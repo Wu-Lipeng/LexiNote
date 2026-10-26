@@ -40,9 +40,9 @@
         <html:label for="lexinote-nutstoreAutoSync">自动同步</html:label>
         <html:label><html:input id="lexinote-nutstoreAutoSync" type="checkbox"/> 生词本变更后自动上传已同步的词库</html:label>
         <html:label for="lexinote-nutstoreAutoSyncDebounce">防抖延迟（秒）</html:label>
-        <html:div><html:input id="lexinote-nutstoreAutoSyncDebounce" type="number" min="1" max="300"/><html:small style="display:block">最后一次编辑结束后等待多久再上传。范围为 1–300 秒。</html:small></html:div>
+        <html:div><html:select id="lexinote-nutstoreAutoSyncDebouncePreset" aria-label="防抖延迟预设"><html:option value="1">1 秒</html:option><html:option value="5">5 秒</html:option><html:option value="60">60 秒</html:option><html:option value="300">300 秒</html:option><html:option value="custom">自定义</html:option></html:select><html:input id="lexinote-nutstoreAutoSyncDebounce" type="number" min="1" max="300" aria-label="自定义防抖延迟（秒）" style="display:none;margin-top:6px"/><html:small style="display:block">最后一次编辑结束后等待多久再上传。</html:small></html:div>
         <html:label for="lexinote-nutstoreAutoSyncMinInterval">最小同步间隔（秒）</html:label>
-        <html:div><html:input id="lexinote-nutstoreAutoSyncMinInterval" type="number" min="1" max="3600"/><html:small style="display:block">同一词库两次自动上传之间的最短间隔。范围为 1–3600 秒。</html:small></html:div>
+        <html:div><html:select id="lexinote-nutstoreAutoSyncMinIntervalPreset" aria-label="最小同步间隔预设"><html:option value="1">1 秒</html:option><html:option value="5">5 秒</html:option><html:option value="60">60 秒</html:option><html:option value="300">300 秒</html:option><html:option value="custom">自定义</html:option></html:select><html:input id="lexinote-nutstoreAutoSyncMinInterval" type="number" min="1" max="3600" aria-label="自定义最小同步间隔（秒）" style="display:none;margin-top:6px"/><html:small style="display:block">同一词库两次自动上传之间的最短间隔。</html:small></html:div>
         <html:label for="lexinote-nutstoreServerUrl">WebDAV 地址</html:label>
         <html:input id="lexinote-nutstoreServerUrl" type="url" placeholder="https://dav.jianguoyun.com/dav/"/>
         <html:label for="lexinote-nutstoreUsername">坚果云账号</html:label>

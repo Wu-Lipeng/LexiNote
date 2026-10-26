@@ -6,6 +6,21 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     $("settings").dataset.initialized = "true";
     const names = ["provider", "endpoint", "method", "headers", "body", "meaningPath", "phoneticPath", "examplePath", "target", "delay", "timeout", "highlightColor", "highlightType", "nutstoreServerUrl", "nutstoreAutoSyncDebounce", "nutstoreAutoSyncMinInterval"];
     for (const name of names) $(name).value = app.config[name];
+    const syncIntervalPresets = new Set(["1", "5", "60", "300"]);
+    const configureSyncIntervalControl = name => {
+      const input = $(name);
+      const preset = $(name + "Preset");
+      const value = String(input.value);
+      preset.value = syncIntervalPresets.has(value) ? value : "custom";
+      input.style.display = preset.value === "custom" ? "block" : "none";
+      preset.addEventListener("change", () => {
+        const custom = preset.value === "custom";
+        input.style.display = custom ? "block" : "none";
+        if (!custom) input.value = preset.value;
+      });
+    };
+    configureSyncIntervalControl("nutstoreAutoSyncDebounce");
+    configureSyncIntervalControl("nutstoreAutoSyncMinInterval");
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
     $("openNoteAfterSave").checked = Boolean(app.config.openNoteAfterSave);

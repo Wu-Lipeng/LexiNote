@@ -12,7 +12,7 @@ test('Unicode single words; reject sentences and oversized selection', () => {
   assert.equal(C.defaults.showNoteLocateStatus, false);
   assert.equal(C.defaults.nutstoreAutoSync, false);
   assert.equal(C.defaults.nutstoreAutoSyncDebounce, 5);
-  assert.equal(C.defaults.nutstoreAutoSyncMinInterval, 60);
+  assert.equal(C.defaults.nutstoreAutoSyncMinInterval, 5);
   assert.equal(C.defaults.highlightColor, '#c0c0c0');
   for (const word of ['apple', 'café', 'naïve', "don't", 'well-being', '中文']) assert.equal(C.wordFrom(word), word);
   assert.equal(C.wordFrom('“apple,”'), 'apple');

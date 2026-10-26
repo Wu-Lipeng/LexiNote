@@ -31,7 +31,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const notesContext={_setPinnedNote:note=>openedNotes.push(note.id),_getCurrentEditor:()=>sideEditor};
       const context={mode:'item',_getNotesContext:()=>notesContext};const contextPane={collapsed:true,context};
       window.Zotero={Prefs:{get:()=>pref,set:(k,v)=>pref=v},Item,Items:{getAsync:async id=>Array.isArray(id)?id.map(x=>store.get(x)):store.get(id)},Libraries:{get:()=>({libraryType:'user'})},getMainWindow:()=>({ZoteroContextPane:contextPane}),Reader:{unregisterEventListener(){}}};
-      window.Services={prompt:{BUTTON_POS_0:1,BUTTON_POS_1:256,BUTTON_TITLE_IS_STRING:127,confirmEx:()=>1}};
+      window.Services={prompt:{BUTTON_POS_0:1,BUTTON_POS_1:256,BUTTON_TITLE_IS_STRING:127,confirmEx:()=>1},logins:{findLogins:()=>[],removeLogin:()=>{}}};
       const app=new LexiNoteRuntime({id:'test',rootURI:''});window.Zotero.LexiNote=app;
       app.getKey=()=>'';app.setKey=async()=>{};
       const p=new Item('journalArticle');await p.saveTx();
@@ -96,6 +96,10 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
     },markup);
     await page.addScriptTag({path:path.resolve(__dirname,'../addon/preferences.js')});
     await page.evaluate(()=>LexiNotePreferences.init());
+    assert.deepEqual(await page.evaluate(()=>{
+      const $=id=>document.getElementById('lexinote-'+id);
+      return {debounce:$('nutstoreAutoSyncDebouncePreset').value,minInterval:$('nutstoreAutoSyncMinIntervalPreset').value,debounceCustom:$('nutstoreAutoSyncDebounce').style.display,minIntervalCustom:$('nutstoreAutoSyncMinInterval').style.display};
+    }),{debounce:'5',minInterval:'5',debounceCustom:'none',minIntervalCustom:'none'});
     const restored=await page.evaluate(()=>{
       const $=id=>document.getElementById('lexinote-'+id);
       let confirmation='';window.confirm=message=>{confirmation=message;return true;};
@@ -123,9 +127,23 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const event=new Event('close',{cancelable:true});window.dispatchEvent(event);return {prevented:event.defaultPrevented,closeCalls};
     });
     assert.deepEqual(discardOnClose,{prevented:true,closeCalls:1});
-    await page.evaluate(()=>{document.getElementById('lexinote-delay').value='300';document.getElementById('lexinote-save').click();});
-    await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('设置已保存'));
+    const firstSaveStatus=await page.evaluate(async()=>{
+      document.getElementById('lexinote-delay').value='300';document.getElementById('lexinote-save').click();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      return document.getElementById('lexinote-status').textContent;
+    });
+    assert.equal(firstSaveStatus,'设置已保存，立即生效。');
     assert.equal(await page.evaluate(()=>Zotero.LexiNote.config.delay),300);
+    const syncIntervals=await page.evaluate(async()=>{
+      const $=id=>document.getElementById('lexinote-'+id);
+      $('nutstoreAutoSyncDebouncePreset').value='custom';$('nutstoreAutoSyncDebouncePreset').dispatchEvent(new Event('change'));
+      $('nutstoreAutoSyncDebounce').value='42';
+      $('nutstoreAutoSyncMinIntervalPreset').value='300';$('nutstoreAutoSyncMinIntervalPreset').dispatchEvent(new Event('change'));
+      $('save').click();
+      await new Promise(resolve=>setTimeout(resolve,0));
+      return {debounce:Zotero.LexiNote.config.nutstoreAutoSyncDebounce,minInterval:Zotero.LexiNote.config.nutstoreAutoSyncMinInterval,debounceVisible:$('nutstoreAutoSyncDebounce').style.display,minIntervalVisible:$('nutstoreAutoSyncMinInterval').style.display};
+    });
+    assert.deepEqual(syncIntervals,{debounce:42,minInterval:300,debounceVisible:'block',minIntervalVisible:'none'});
     assert.equal(await page.evaluate(()=>{const event=new Event('close',{cancelable:true});window.dispatchEvent(event);return event.defaultPrevented;}),false);
     await page.evaluate(()=>document.getElementById('lexinote-test').click());
     await page.waitForFunction(()=>document.getElementById('lexinote-status').textContent.includes('测试成功'));
