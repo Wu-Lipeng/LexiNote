@@ -1049,7 +1049,7 @@ var LexiNoteRuntime = class {
     const parent = await this.exportParentItem();
     let filename = this.wordbookFilename(parent);
     while (true) {
-      const value = window.prompt("请输入本篇文章的同步文件名（可省略 .json）：", filename);
+      const value = window.prompt("请输入本篇文章的同步文件名（.json）：", filename);
       if (value === null) throw new Error("已取消坚果云同步。");
       try { return this.nutstoreFilename(value); }
       catch (error) {
