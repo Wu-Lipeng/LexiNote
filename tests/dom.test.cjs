@@ -101,11 +101,13 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       while(node&&node.localName!=='h3'){controls.push(...node.querySelectorAll('input, select, button'));node=node.nextElementSibling;}
       return {title:heading.textContent,controls:controls.map(control=>control.id)};
     })),[
-      {title:'模块一：划词查询',controls:['lexinote-enabled','lexinote-delay','lexinote-timeout']},
-      {title:'模块二：划词标记',controls:['lexinote-autoHighlight','lexinote-highlightColor','lexinote-highlightType']},
-      {title:'模块三：定位',controls:['lexinote-autoLocateSavedWord','lexinote-openNoteAfterSave','lexinote-noteLocateMode','lexinote-showNoteLocateStatus']},
-      {title:'模块四：操作',controls:['lexinote-restoreFeatures','lexinote-syncHighlights','lexinote-sortWordbook','lexinote-diagnoseSourceSentences']}
+      {title:'划词查询',controls:['lexinote-enabled','lexinote-delay','lexinote-timeout']},
+      {title:'划词标记',controls:['lexinote-autoHighlight','lexinote-highlightColor','lexinote-highlightType']},
+      {title:'定位',controls:['lexinote-autoLocateSavedWord','lexinote-openNoteAfterSave','lexinote-noteLocateMode','lexinote-showNoteLocateStatus']},
+      {title:'操作',controls:['lexinote-restoreFeatures','lexinote-syncHighlights','lexinote-sortWordbook','lexinote-diagnoseSourceSentences']}
     ]);
+    assert.equal(await page.evaluate(()=>{const $=id=>document.getElementById('lexinote-'+id);$('autoHighlight').checked=false;$('autoHighlight').dispatchEvent(new Event('change'));return $('autoHighlightOptions').hidden;}),true);
+    assert.equal(await page.evaluate(()=>{const $=id=>document.getElementById('lexinote-'+id);$('autoHighlight').checked=true;$('autoHighlight').dispatchEvent(new Event('change'));return $('autoHighlightOptions').hidden;}),false);
     assert.deepEqual(await page.evaluate(()=>{
       const $=id=>document.getElementById('lexinote-'+id);
       return {debounce:$('nutstoreAutoSyncDebouncePreset').value,minInterval:$('nutstoreAutoSyncMinIntervalPreset').value,debounceCustom:$('nutstoreAutoSyncDebounce').style.display,minIntervalCustom:$('nutstoreAutoSyncMinInterval').style.display};

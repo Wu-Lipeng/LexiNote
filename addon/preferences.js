@@ -23,6 +23,9 @@ var LexiNotePreferences = window.LexiNotePreferences = {
     configureSyncIntervalControl("nutstoreAutoSyncMinInterval");
     $("enabled").checked = app.config.enabled;
     $("autoHighlight").checked = Boolean(app.config.autoHighlight);
+    const updateAutoHighlightOptions = () => { $("autoHighlightOptions").hidden = !$("autoHighlight").checked; };
+    updateAutoHighlightOptions();
+    $("autoHighlight").addEventListener("change", updateAutoHighlightOptions);
     $("openNoteAfterSave").checked = Boolean(app.config.openNoteAfterSave);
     $("autoLocateSavedWord").checked = Boolean(app.config.autoLocateSavedWord);
     $("noteLocateMode").value = app.config.noteLocateMode || "select";
@@ -93,6 +96,7 @@ var LexiNotePreferences = window.LexiNotePreferences = {
       };
       $("enabled").checked = defaults.enabled;
       $("autoHighlight").checked = defaults.autoHighlight;
+      updateAutoHighlightOptions();
       $("openNoteAfterSave").checked = defaults.openNoteAfterSave;
       $("autoLocateSavedWord").checked = defaults.autoLocateSavedWord;
       $("noteLocateMode").value = defaults.noteLocateMode;
