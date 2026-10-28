@@ -150,6 +150,15 @@ test('annotation association targets the saved entry when entries share one orig
   assert.equal(app.savedHeadingForAssociation(root, 'second', 'shared'), second);
   assert.equal(app.savedHeadingForAssociation(root, 'missing', 'shared'), null);
 });
+test('annotation association writes share the word-save queue', async () => {
+  const {app}=runtime();
+  const written=[];
+  app.writeAnnotationID=async (_noteID, word)=>{written.push(word);};
+  const first=app.saveAnnotationID(1, 'first', 'shared', 'annotation-1', 2);
+  const second=app.saveAnnotationID(1, 'second', 'shared', 'annotation-2', 2);
+  await Promise.all([first,second]);
+  assert.deepEqual(written, ['first','second']);
+});
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');

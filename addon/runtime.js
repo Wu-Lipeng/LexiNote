@@ -1493,7 +1493,15 @@ var LexiNoteRuntime = class {
       return false;
     }
   }
-  async saveAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
+  saveAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
+    // Annotation creation can complete while another popup is saving a word.
+    // Keep this write in the same queue as note edits so an older document
+    // revision cannot overwrite a newer word or its association.
+    const pending = this.noteQueue.then(() => this.writeAnnotationID(noteID, word, originalWord, annotationID, attachmentID));
+    this.noteQueue = pending.catch(() => {});
+    return pending;
+  }
+  async writeAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
     const note = await Zotero.Items.getAsync(noteID);
     if (!note?.isEditable?.()) return;
     // This may run immediately after writeWord(). Always refresh first so a
