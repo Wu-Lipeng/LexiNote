@@ -1501,6 +1501,19 @@ var LexiNoteRuntime = class {
       return false;
     }
   }
+  async flushOpenNoteEditor(note) {
+    try {
+      const context = Zotero.getMainWindow?.()?.ZoteroContextPane?.context;
+      const editor = context?._getNotesContext?.(note.libraryID)?._getCurrentEditor?.();
+      if (!editor || editor.item?.id !== note.id || typeof editor.saveSync !== "function") return false;
+      // The editor keeps its own document state. Commit it before reloading
+      // and editing the item through the data API, otherwise its delayed save
+      // can restore the pre-association HTML over the new annotation ID.
+      editor.saveSync();
+      await Promise.resolve();
+      return true;
+    } catch (_) { return false; }
+  }
   saveAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
     // Annotation creation can complete while another popup is saving a word.
     // Keep this write in the same queue as note edits so an older document
@@ -1512,6 +1525,7 @@ var LexiNoteRuntime = class {
   async writeAnnotationID(noteID, word, originalWord, annotationID, attachmentID) {
     const note = await Zotero.Items.getAsync(noteID);
     if (!note?.isEditable?.()) return;
+    await this.flushOpenNoteEditor(note);
     // This may run immediately after writeWord(). Always refresh first so a
     // cached editor revision cannot overwrite the just-saved vocabulary entry.
     if (typeof note.reload === "function") await note.reload(["note"], true);

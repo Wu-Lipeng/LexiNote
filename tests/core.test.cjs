@@ -170,6 +170,14 @@ test('auto-mark resolves an ID from reader annotations when Zotero returns no va
   const result=await app.autoMark({}, draft);
   assert.deepEqual(JSON.parse(JSON.stringify(result)), {marked:true,annotationID:'stored-annotation'});
 });
+test('association writes flush the open note editor before changing its item', async () => {
+  const {app,context}=runtime();
+  const calls=[];
+  const note={id:8,libraryID:1};
+  context.Zotero.getMainWindow=()=>({ZoteroContextPane:{context:{_getNotesContext:()=>({_getCurrentEditor:()=>({item:note,saveSync:()=>calls.push('flush')})})}}});
+  assert.equal(await app.flushOpenNoteEditor(note), true);
+  assert.deepEqual(calls, ['flush']);
+});
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');
