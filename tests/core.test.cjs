@@ -142,6 +142,14 @@ test('saved-word matching accepts the query word, original selection, and legacy
   assert.equal(app.isWordHeading({textContent:'Present',querySelector:()=>({})}), false);
   assert.equal(app.isWordHeading({textContent:'a linked heading',querySelector:()=>null}), false);
 });
+test('annotation association targets the saved entry when entries share one original selection', () => {
+  const {app}=runtime();
+  const first={dataset:{lexinoteWord:'first',lexinoteOriginalWord:'shared'},textContent:'first',querySelector:()=>null};
+  const second={dataset:{lexinoteWord:'second',lexinoteOriginalWord:'shared'},textContent:'second',querySelector:()=>null};
+  const root={querySelectorAll:()=>[first,second]};
+  assert.equal(app.savedHeadingForAssociation(root, 'second', 'shared'), second);
+  assert.equal(app.savedHeadingForAssociation(root, 'missing', 'shared'), null);
+});
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');

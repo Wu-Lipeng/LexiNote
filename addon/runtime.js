@@ -748,6 +748,22 @@ var LexiNoteRuntime = class {
   wordHeadings(root) {
     return [...root.querySelectorAll("h3")].filter(heading => this.isWordHeading(heading));
   }
+  savedHeadingForAssociation(root, word, originalWord) {
+    const headings = this.wordHeadings(root);
+    const normalizedWord = LexiNoteCore.normalize(word);
+    // A lookup can produce several saved entries from the same selection.
+    // Never let the shared source word redirect a later entry's annotation
+    // to the first matching heading.
+    const exact = headings.find(heading => heading.dataset.lexinoteWord === normalizedWord
+      || LexiNoteCore.normalize(heading.textContent.trim()) === normalizedWord);
+    if (exact) return exact;
+    // Old notes can lack the saved-word data attribute. Keep the original-word
+    // fallback only when it identifies exactly one heading.
+    const normalizedOriginal = LexiNoteCore.normalize(originalWord);
+    if (!normalizedOriginal) return null;
+    const legacy = headings.filter(heading => this.matchesSavedWord(heading, normalizedOriginal));
+    return legacy.length === 1 ? legacy[0] : null;
+  }
   annotationIDForHeading(heading) {
     if (heading.dataset.lexinoteAnnotationId) return heading.dataset.lexinoteAnnotationId;
     try {
@@ -1484,8 +1500,7 @@ var LexiNoteRuntime = class {
     // cached editor revision cannot overwrite the just-saved vocabulary entry.
     if (typeof note.reload === "function") await note.reload(["note"], true);
     const document = new DOMParser().parseFromString(note.getNote(), "text/html");
-    const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
-    const heading = this.wordHeadings(document).find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
+    const heading = this.savedHeadingForAssociation(document, word, originalWord);
     if (!heading) return;
     heading.dataset.lexinoteAnnotationId = annotationID;
     heading.dataset.lexinoteAttachmentId = String(attachmentID);
@@ -1507,8 +1522,7 @@ var LexiNoteRuntime = class {
     const note = await Zotero.Items.getAsync(noteID);
     if (!note) return "";
     const document = new DOMParser().parseFromString(note.getNote(), "text/html");
-    const normalized = LexiNoteCore.normalize(word), original = LexiNoteCore.normalize(originalWord);
-    const heading = this.wordHeadings(document).find(h => this.matchesSavedWord(h, normalized) || this.matchesSavedWord(h, original));
+    const heading = this.savedHeadingForAssociation(document, word, originalWord);
     const source = heading && this.entrySourceLine(heading)?.querySelector?.('a[href^="zotero://open-pdf/"]');
     try { return new URL(source?.href || "").searchParams.get("annotation") || ""; }
     catch (_) { return heading?.dataset.lexinoteAnnotationId || ""; }
