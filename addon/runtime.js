@@ -331,7 +331,7 @@ var LexiNoteRuntime = class {
     }
     return null;
   }
-  autoMark(reader, draft) {
+  async autoMark(reader, draft) {
     if (!this.config.autoHighlight) return { marked: false, reason: "disabled" };
     if (!draft?.position?.rects?.length || !draft.sortIndex) return { marked: false, reason: "未取得选中文本的标注位置。" };
     try {
@@ -342,8 +342,14 @@ var LexiNoteRuntime = class {
       // object through Xray wrappers loses dictionary properties such as color.
       const frame = this.readerFrame(reader);
       const annotation = frame?.JSON?.parse ? frame.JSON.parse(JSON.stringify(data)) : data;
-      const created = manager.addAnnotation(annotation);
-      return { marked: Boolean(created || annotation.id), annotationID: created?.id || annotation.id || "" };
+      // Zotero reader versions differ: addAnnotation may return an annotation,
+      // an ID, a promise, or no value at all. Resolve the call first, then
+      // read the manager's canonical annotation collection as a fallback.
+      const created = await manager.addAnnotation(annotation);
+      const createdID = typeof created === "string" ? created : (created?.id || created?.key || "");
+      const stored = this.existingMark(reader, draft);
+      const annotationID = createdID || annotation.id || stored?.id || stored?.key || "";
+      return { marked: Boolean(created || annotationID), annotationID };
     } catch (error) {
       return { marked: false, reason: error?.message || "Zotero 拒绝创建标注。" };
     }
@@ -351,7 +357,9 @@ var LexiNoteRuntime = class {
   existingMark(reader, draft) {
     if (!draft?.position?.rects?.length) return null;
     try {
-      const annotations = this.readerInternal(reader)?._annotationManager?._annotations || [];
+      const rawAnnotations = this.readerInternal(reader)?._annotationManager?._annotations || [];
+      const annotations = rawAnnotations instanceof Map ? [...rawAnnotations.values()]
+        : Array.isArray(rawAnnotations) ? rawAnnotations : Object.values(rawAnnotations);
       const covers = (outer, inner) => outer[0] <= inner[0] + 0.5 && outer[1] <= inner[1] + 0.5
         && outer[2] >= inner[2] - 0.5 && outer[3] >= inner[3] - 0.5;
       return annotations.find(annotation => {
@@ -364,10 +372,10 @@ var LexiNoteRuntime = class {
       }) || null;
     } catch (_) { return null; }
   }
-  markForNewEntry(reader, draft) {
+  async markForNewEntry(reader, draft) {
     const existing = this.existingMark(reader, draft);
     if (existing) return { marked: true, existing: true, annotationID: existing.id };
-    return { ...this.autoMark(reader, draft), existing: false };
+    return { ...await this.autoMark(reader, draft), existing: false };
   }
   trialCredentials() {
     const source = typeof LexiNoteTrialCredentials === "object" ? LexiNoteTrialCredentials : {};
@@ -598,7 +606,7 @@ var LexiNoteRuntime = class {
         // first can leave the note iframe on an older revision without the
         // annotation URL parameter used for exact navigation.
         if (!saved.duplicate) {
-          marking = this.markForNewEntry(reader, highlightDraft);
+          marking = await this.markForNewEntry(reader, highlightDraft);
           if (marking.annotationID) {
             try { await this.saveAnnotationID(saved.noteID, entry.word, word, marking.annotationID, attachmentID); }
             catch (_) { associationWarning = " 高亮关联未保存，但单词已保存。"; }

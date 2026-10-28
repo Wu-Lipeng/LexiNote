@@ -159,6 +159,17 @@ test('annotation association writes share the word-save queue', async () => {
   await Promise.all([first,second]);
   assert.deepEqual(written, ['first','second']);
 });
+test('auto-mark resolves an ID from reader annotations when Zotero returns no value', async () => {
+  const {app}=runtime();
+  const draft={position:{pageIndex:1,rects:[[10,20,30,40]]},sortIndex:1};
+  const manager={_annotations:[],addAnnotation:async annotation=>{
+    manager._annotations.push({id:'stored-annotation',type:annotation.type,position:annotation.position});
+  }};
+  app.readerInternal=()=>({_annotationManager:manager});
+  app.readerFrame=()=>null;
+  const result=await app.autoMark({}, draft);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), {marked:true,annotationID:'stored-annotation'});
+});
 test('saved-word source links use the concise current page label', () => {
   const {app}=runtime();
   assert.equal(app.sourceLinkText({href:'zotero://open-pdf/library/items/ABC?page=3'}), '第 3 页');
