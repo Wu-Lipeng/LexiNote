@@ -599,18 +599,16 @@ var LexiNoteRuntime = class {
       if (saveButton.disabled) return;
       saveButton.disabled = true; status.textContent = "正在保存…";
       try {
-        const saved = await this.saveWord({ attachmentID, word: entry.word, originalWord: word, result: entry.result, pageLabel, pageIndex });
         let marking = null;
         let associationWarning = "";
-        // Persist the highlighter identifier before opening the note. Opening
-        // first can leave the note iframe on an older revision without the
-        // annotation URL parameter used for exact navigation.
+        // New entries receive the annotation ID in their initial note write.
+        // Updating an already-open note in a second write lets its editor
+        // restore stale HTML and discard the new ID.
+        const alreadySaved = await this.findSavedWord(attachmentID, entry.word);
+        if (!alreadySaved) marking = await this.markForNewEntry(reader, highlightDraft);
+        const saved = await this.saveWord({ attachmentID, word: entry.word, originalWord: word, result: entry.result, pageLabel, pageIndex,
+          annotationID: marking?.annotationID || "" });
         if (!saved.duplicate) {
-          marking = await this.markForNewEntry(reader, highlightDraft);
-          if (marking.annotationID) {
-            try { await this.saveAnnotationID(saved.noteID, entry.word, word, marking.annotationID, attachmentID); }
-            catch (_) { associationWarning = " 高亮关联未保存，但单词已保存。"; }
-          }
           await this.openNotebookAtEnd(saved.noteID);
         } else {
           // Re-saving an existing word is allowed to repair a missing
@@ -1680,7 +1678,7 @@ var LexiNoteRuntime = class {
       visit(main);
     } catch (_) {}
   }
-  async writeWord({ attachmentID, word, originalWord, result, pageLabel, pageIndex }) {
+  async writeWord({ attachmentID, word, originalWord, result, pageLabel, pageIndex, annotationID = "" }) {
     if (!this.alive) throw new Error("插件已停用。");
     const attachment = await Zotero.Items.getAsync(attachmentID);
     if (!attachment || attachment.deleted || !attachment.isAttachment()) throw new Error("原文附件已不存在。");
@@ -1708,7 +1706,7 @@ var LexiNoteRuntime = class {
       );
       if (duplicate) {
         const formatUpdated = candidate.isEditable() && this.updateSavedWordFormat(candidateDocument, candidateRoot, duplicate,
-          savedOriginalWord, attachment, pageLabel, pageIndex);
+          savedOriginalWord, attachment, pageLabel, pageIndex, annotationID);
         if (formatUpdated) {
           candidate.setNote(candidateDocument.body.innerHTML);
           try { await candidate.saveTx(); }
@@ -1736,11 +1734,18 @@ var LexiNoteRuntime = class {
     wordHeading.dataset.lexinoteWord = normalizedWord;
     wordHeading.dataset.lexinoteOriginalWord = normalizedOriginalWord;
     wordHeading.dataset.lexinoteCreatedAt = new Date().toISOString();
+    if (annotationID) {
+      wordHeading.dataset.lexinoteAnnotationId = annotationID;
+      wordHeading.dataset.lexinoteAttachmentId = String(attachment.id);
+    }
     if (result.phonetic) add("p", result.phonetic);
     for (const line of result.meaning.split("\n")) if (line) add("p", line);
     if (result.example) add("p", "例句：" + result.example);
     const p = add("p", "");
     const link = this.createSourceLink(document, attachment, pageLabel, pageIndex);
+    if (annotationID) {
+      const url = new URL(link.href); url.searchParams.set("annotation", annotationID); link.href = url.href;
+    }
     p.append(document.createTextNode("原文词：" + savedOriginalWord + " · "), link,
       document.createTextNode(" · " + new Date().toLocaleDateString()));
     note.setNote(document.body.innerHTML);

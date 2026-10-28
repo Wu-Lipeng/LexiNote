@@ -47,6 +47,8 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       const savedSharedHighlightWord=await app.saveWord(sharedHighlightWord);
       check(!savedSharedHighlightWord.duplicate&&note.getNote().includes('manual-query'),'Different words from one highlight are saved separately');
       check((await app.saveWord(sharedHighlightWord)).duplicate,'Same word remains a duplicate even when it shares a highlight');
+      const directAssociation=await app.saveWord({...entry('associated'),annotationID:'annotation-direct'});
+      check(!directAssociation.duplicate&&note.getNote().includes('annotation=annotation-direct'),'New entries persist their annotation ID in the initial note write');
       check(note.reloaded,'Saved note is reloaded and verified before it is reported as saved');
       check(note.getNote().includes('?page=3'),'Source page link preserved');
       note.setNote(note.getNote().replace('</h1>','</h1><p>Manual text</p>'));
@@ -92,7 +94,7 @@ test('DOM note integrity, popup interaction and settings round trip',async()=>{
       app.stop();
       return results;
     });
-    assert.equal(results.length,24);
+    assert.equal(results.length,25);
     const markup=fs.readFileSync(path.resolve(__dirname,'../addon/preferences.xhtml'),'utf8');
     await page.evaluate(markup=>{
       const parsed=new DOMParser().parseFromString(markup,'application/xml');
